@@ -2,3 +2,13 @@
 .models/
 .runs/
 .temp/
+/vocab/wmt14_cs-en/train_cs.txt
+/vocab/wmt14_cs-en/train_en.txt
+/vocab/wmt14_de-en/train_de.txt
+/vocab/wmt14_de-en/train_en.txt
+/vocab/wmt14_fr-en/train_fr.txt
+/vocab/wmt14_fr-en/train_en.txt
+/vocab/wmt14_hi-en/train_hi.txt
+/vocab/wmt14_hi-en/train_en.txt
+/vocab/wmt14_ru-en/train_ru.txt
+/vocab/wmt14_ru-en/train_en.txt
