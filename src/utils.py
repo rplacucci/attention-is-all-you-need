@@ -39,10 +39,14 @@ class SublayerConnection(nn.Module):
         Returns:
             Tensor after applying sublayer, residual connection, and normalization.
     """
-    def __init__(self, embed_size, dropout):
+    def __init__(self, embed_size, dropout, prenorm=False):
         super().__init__()
         self.norm = nn.LayerNorm(embed_size)
         self.dropout = nn.Dropout(dropout)
+        self.prenorm = prenorm
     
     def forward(self, x, sublayer):
-        return x + self.dropout(sublayer(self.norm(x)))   # pre-norm with dropout
+        if self.prenorm:
+            return x + self.dropout(sublayer(self.norm(x)))     # pre-norm
+        else:
+            return self.norm(x + self.dropout(sublayer(x)))     # post-norm
