@@ -85,10 +85,10 @@ class Generator(nn.Module):
         return F.log_softmax(self.proj(x), dim=-1)  # log-softmax + KL div
     
 class Transformer(nn.Module):
-    def __init__(self, n_layers, vocab_size, embed_size, ff_size, attn_heads, dropout):
+    def __init__(self, n_layers, max_len, vocab_size, embed_size, ff_size, attn_heads, dropout):
         super().__init__()
         self.tok_embed = TokenEmbedding(vocab_size, embed_size)
-        self.pos_embed = PositionalEncoding(embed_size, dropout, max_len=512)
+        self.pos_embed = PositionalEncoding(embed_size, max_len, dropout)
         self.encoder = Encoder(n_layers, attn_heads, embed_size, ff_size, dropout)
         self.decoder = Decoder(n_layers, attn_heads, embed_size, ff_size, dropout)
         self.generator = Generator(embed_size, vocab_size)

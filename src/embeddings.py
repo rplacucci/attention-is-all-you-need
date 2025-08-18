@@ -12,9 +12,9 @@ class TokenEmbedding(nn.Module):
         return self.lut(x) * math.sqrt(self.embed_size)
 
 class PositionalEncoding(nn.Module):
-    def __init__(self, embed_size, dropout, max_len):
+    def __init__(self, embed_size, max_len, dropout):
         super().__init__()
-        self.dropout = nn.Dropout(p=dropout)
+        self.dropout = nn.Dropout(dropout)
         pe = torch.zeros(max_len, embed_size)
         pos = torch.arange(0, max_len).unsqueeze(1)
 
