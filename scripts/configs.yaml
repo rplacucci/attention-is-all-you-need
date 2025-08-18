@@ -1,0 +1,13 @@
+base:
+  n_layers: 6
+  embed_size: 512
+  ff_size: 2048
+  attn_heads: 8
+  dropout: 0.1
+
+big:
+  n_layers: 6
+  embed_size: 1024
+  ff_size: 4096
+  attn_heads: 16
+  dropout: 0.3
