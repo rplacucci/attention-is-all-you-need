@@ -2,7 +2,7 @@ import math
 import torch
 import torch.nn as nn
 
-class Embeddings(nn.Module):
+class TokenEmbedding(nn.Module):
     def __init__(self, vocab_size, embed_size):
         super().__init__()
         self.embed_size = embed_size

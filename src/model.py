@@ -3,7 +3,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 from attention import MultiHeadAttention
-from embeddings import Embeddings, PositionalEncoding
+from embeddings import TokenEmbedding, PositionalEncoding
 from utils import SublayerConnection, PositionWiseFeedForward
 
 class EncoderLayer(nn.Module):
@@ -87,7 +87,7 @@ class Generator(nn.Module):
 class Transformer(nn.Module):
     def __init__(self, n_layers, vocab_size, embed_size, ff_size, attn_heads, dropout):
         super().__init__()
-        self.tok_embed = Embeddings(vocab_size, embed_size)
+        self.tok_embed = TokenEmbedding(vocab_size, embed_size)
         self.pos_embed = PositionalEncoding(embed_size, dropout, max_len=512)
         self.encoder = Encoder(n_layers, attn_heads, embed_size, ff_size, dropout)
         self.decoder = Decoder(n_layers, attn_heads, embed_size, ff_size, dropout)
