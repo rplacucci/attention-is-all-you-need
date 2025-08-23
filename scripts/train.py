@@ -19,7 +19,7 @@ from src.model import Transformer
 from src.utils import LabelSmoothing, greedy_decode
 from src.dataset import WMT14Dataset
 
-# torchrun --standalone -nproc-per-node 4 train.py
+# torchrun --standalone --nproc-per-node=4 -m scripts.train
 
 # Config argparser
 parser = argparse.ArgumentParser(description="Train the original Transformer for language translation")
@@ -68,5 +68,22 @@ path_vocab = f"./vocab/wmt14_{lang_pair}/bpe_{lang_pair}.json"
 if not os.path.exists(path_vocab):
     print(f"Tokenizer file {path_vocab} does not exist. Run 'python -m vocab.build_vocab' and try again")
     sys.exit(1)
+
 tokenizer = Tokenizer.from_file(path_vocab)
-print(f"Loaded tokenizer from {path_vocab}")
+vocab_size = tokenizer.get_vocab_size()
+if master_process:
+    print(f"Loaded tokenizer from {path_vocab} with size {vocab_size:,}")
+
+# Setup model
+with open("./scripts/configs.yaml", "r") as f:
+    configs = yaml.safe_load(f)
+
+model = Transformer(vocab_size=vocab_size, **configs[args.model_config]).to(device)
+if master_process:
+    print(f"Loaded {model.__class__.__name__} with {sum(p.numel() for p in model.parameters() if p.requires_grad):,} trainable parameters")
+
+# Wrap the model with DistributedDataParallel if distributed training is enabled
+if distributed:
+    model = DDP(model, device_ids=[local_rank], output_device=local_rank)
+print(f"Initialized model on {device}")
+time.sleep(0.5)
