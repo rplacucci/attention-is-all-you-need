@@ -1,6 +1,6 @@
 .venv/
 .models/
-.runs/
+.logs/
 .temp/
 __pycache__
 /vocab/wmt14_cs-en/train_cs.txt
