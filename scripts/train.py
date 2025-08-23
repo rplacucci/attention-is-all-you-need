@@ -142,7 +142,7 @@ valid_sampler = DistributedSampler(
     dataset=valid_dataset,
     num_replicas=world_size,
     rank=rank,
-    shuffle=True,
+    shuffle=False,
     seed=seed
 )
 
