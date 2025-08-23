@@ -22,7 +22,7 @@ lang_pair = f"{lang_a}-{lang_b}"
 
 print(f"Loading {lang_pair} corpus...")
 wmt14 = load_dataset("wmt/wmt14", lang_pair, split="train")
-root = f"./wmt14_{lang_pair}"
+root = f"./vocab/wmt14_{lang_pair}"
 os.makedirs(root, exist_ok=True)
 
 # Save en-de examples to files
