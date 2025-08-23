@@ -172,3 +172,14 @@ scheduler = InverseSqrtLR(optimizer=optimizer, embed_size=config['embed_size'], 
 if master_process:
     print(f"Loaded {optimizer.__class__.__name__} optimizer")
     print(f"Loaded {scheduler.__class__.__name__} learning rate scheduler")
+
+# Setup tensorboard and directories for logging/saving
+out_dir = f"./models/transformer-{args.model_config}-{lang_pair}"
+log_dir = f"./logs/transformer-{args.model_config}-{lang_pair}"
+
+if master_process:
+    writer = SummaryWriter(log_dir)
+    os.makedirs(out_dir)
+
+if distributed:
+    dist.barrier()
