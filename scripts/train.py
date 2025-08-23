@@ -10,6 +10,7 @@ from torch.distributed import init_process_group, destroy_process_group
 from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.utils.data import DataLoader, DistributedSampler
 from torch.utils.tensorboard import SummaryWriter
+from torch.optim import Adam
 
 from tqdm import tqdm
 from datasets import load_dataset
@@ -18,6 +19,7 @@ from tokenizers import Tokenizer
 from src.model import Transformer
 from src.utils import LabelSmoothing, greedy_decode
 from src.dataset import WMT14Dataset
+from src.scheduler import InverseSqrtLR
 
 # torchrun --standalone --nproc-per-node=4 -m scripts.train
 
@@ -76,9 +78,9 @@ if master_process:
 
 # Setup model
 with open("./scripts/configs.yaml", "r") as f:
-    configs = yaml.safe_load(f)
+    config = yaml.safe_load(f)[args.model_config]
 
-model = Transformer(vocab_size=vocab_size, **configs[args.model_config]).to(device)
+model = Transformer(vocab_size=vocab_size, **config).to(device)
 if master_process:
     print(f"Loaded {model.__class__.__name__} with {sum(p.numel() for p in model.parameters() if p.requires_grad):,} trainable parameters")
 
@@ -90,7 +92,7 @@ time.sleep(0.5)
 
 # Get maximim sequence length and batch size
 batch_size = args.batch_size
-max_len = configs[args.model_config]['max_len']
+max_len = config['max_len']
 
 # Load dev dataset
 wmt14 = load_dataset("wmt/wmt14", lang_pair)
@@ -153,3 +155,20 @@ valid_dataloader = DataLoader(
 )
 
 valid_dataiter = iter(valid_dataloader)
+
+# Define number of training iterations
+total_steps = 300000 if args.model_config == 'big' else 100000
+if master_process:
+    print(f"Total training steps set to {total_steps:,}")
+
+# Define optimizer and learning rate schedule
+betas = (0.9, 0.98)
+eps = 1e-9
+warmup_steps = 4000
+
+optimizer = Adam(model.parameters(), lr=1.0, betas=betas, eps=eps, fused=True)
+scheduler = InverseSqrtLR(optimizer=optimizer, embed_size=config['embed_size'], warmup_steps=warmup_steps)
+
+if master_process:
+    print(f"Loaded {optimizer.__class__.__name__} optimizer")
+    print(f"Loaded {scheduler.__class__.__name__} learning rate scheduler")
