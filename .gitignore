@@ -2,6 +2,7 @@
 .models/
 .runs/
 .temp/
+__pycache__
 /vocab/wmt14_cs-en/train_cs.txt
 /vocab/wmt14_cs-en/train_en.txt
 /vocab/wmt14_de-en/train_de.txt
