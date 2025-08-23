@@ -87,3 +87,69 @@ if distributed:
     model = DDP(model, device_ids=[local_rank], output_device=local_rank)
 print(f"Initialized model on {device}")
 time.sleep(0.5)
+
+# Get maximim sequence length and batch size
+batch_size = args.batch_size
+max_len = configs[args.model_config]['max_len']
+
+# Load dev dataset
+wmt14 = load_dataset("wmt/wmt14", lang_pair)
+splits = ['train', 'validation']
+time.sleep(5)
+
+if master_process:
+    print(f"Loaded WMT14[{lang_pair}] dataset with {sum([len(wmt14[split]) for split in splits]):,} train/val sequence pairs")
+if distributed:
+    dist.barrier()
+
+train_dataset = WMT14Dataset(
+    dataset=wmt14['train'],
+    tokenizer=tokenizer,
+    max_len=max_len,
+    src_lang=lang_a,
+    tgt_lang=lang_b
+)
+
+train_sampler = DistributedSampler(
+    dataset=train_dataset,
+    num_replicas=world_size,
+    rank=rank,
+    shuffle=True,
+    seed=seed
+)
+
+train_dataloader = DataLoader(
+    dataset=train_dataset,
+    batch_size=batch_size,
+    sampler=train_sampler,
+    num_workers=0,
+    prefetch_factor=None
+)
+
+train_dataiter = iter(train_dataloader)
+
+valid_dataset = WMT14Dataset(
+    dataset=wmt14['validation'],
+    tokenizer=tokenizer,
+    max_len=max_len,
+    src_lang=lang_a,
+    tgt_lang=lang_b
+)
+
+valid_sampler = DistributedSampler(
+    dataset=valid_dataset,
+    num_replicas=world_size,
+    rank=rank,
+    shuffle=True,
+    seed=seed
+)
+
+valid_dataloader = DataLoader(
+    dataset=valid_dataset,
+    batch_size=batch_size,
+    sampler=valid_sampler,
+    num_workers=0,
+    prefetch_factor=None
+)
+
+valid_dataiter = iter(valid_dataloader)
