@@ -8,7 +8,8 @@ import torch
 import torch.distributed as dist
 from torch.distributed import init_process_group, destroy_process_group
 from torch.nn.parallel import DistributedDataParallel as DDP
-from torch.utils.data import DataLoader, DistributedSampler
+from torchdata.stateful_dataloader import StatefulDataLoader
+from torchdata.stateful_dataloader.sampler import StatefulDistributedSampler
 from torch.utils.tensorboard import SummaryWriter
 from torch.optim import Adam
 
@@ -112,7 +113,7 @@ train_dataset = WMT14Dataset(
     tgt_lang=lang_b
 )
 
-train_sampler = DistributedSampler(
+train_sampler = StatefulDistributedSampler(
     dataset=train_dataset,
     num_replicas=world_size,
     rank=rank,
@@ -120,15 +121,13 @@ train_sampler = DistributedSampler(
     seed=seed
 )
 
-train_dataloader = DataLoader(
+train_dataloader = StatefulDataLoader(
     dataset=train_dataset,
     batch_size=batch_size,
     sampler=train_sampler,
     num_workers=0,
     prefetch_factor=None
 )
-
-train_dataiter = iter(train_dataloader)
 
 valid_dataset = WMT14Dataset(
     dataset=wmt14['validation'],
@@ -138,7 +137,7 @@ valid_dataset = WMT14Dataset(
     tgt_lang=lang_b
 )
 
-valid_sampler = DistributedSampler(
+valid_sampler = StatefulDistributedSampler(
     dataset=valid_dataset,
     num_replicas=world_size,
     rank=rank,
@@ -146,15 +145,13 @@ valid_sampler = DistributedSampler(
     seed=seed
 )
 
-valid_dataloader = DataLoader(
+valid_dataloader = StatefulDataLoader(
     dataset=valid_dataset,
     batch_size=batch_size,
     sampler=valid_sampler,
     num_workers=0,
     prefetch_factor=None
 )
-
-valid_dataiter = iter(valid_dataloader)
 
 # Define number of training iterations
 total_steps = 300000 if args.model_config == 'big' else 100000
@@ -179,7 +176,65 @@ log_dir = f"./logs/transformer-{args.model_config}-{lang_pair}"
 
 if master_process:
     writer = SummaryWriter(log_dir)
-    os.makedirs(out_dir)
+    os.makedirs(out_dir, exist_ok=True)
 
 if distributed:
     dist.barrier()
+
+# Resume from checkpoint if available
+start_step = 0
+ckpt_main_path = os.path.join(out_dir, "ckpt.pt")
+ckpt_rank_path = os.path.join(out_dir, f"ckpt_rank{rank}.pt")
+
+if master_process and os.path.exists(ckpt_main_path):
+    print(f"Found model checkpoint at {ckpt_main_path}")
+    state = torch.load(ckpt_main_path, map_location='cpu')
+
+    model.module.load_state_dict(state['model']) if distributed else model.load_state_dict(state['model'])
+    optimizer.load_state_dict(state['optimizer'])
+    scheduler.load_state_dict(state['scheduler'])
+    start_step = state['step'] + 1
+
+    print(f"Resuming from step {start_step}")
+
+if os.path.exists(ckpt_rank_path):
+    print(f"Found loader checkpoint at {ckpt_rank_path}")
+    state = torch.load(ckpt_rank_path, map_location=device)
+
+    train_dataloader.load_state_dict(state['train'])
+    valid_dataloader.load_state_dict(state['valid'])
+    start_step = state['step'] + 1
+
+time.sleep(3)
+if distributed:
+    dist.barrier()
+
+# Begin traning loop
+ckpt_steps = 100
+step = start_step
+
+for batch in train_dataloader:
+    if step >= total_steps:
+        break
+
+    # Save checkpoint
+    if step % ckpt_steps == 0 and step > 0:
+        state = {
+            'step': step,
+            'model': model.module.state_dict() if distributed else model.state_dict(),
+            'optimizer': optimizer.state_dict(),
+            'scheduler': scheduler.state_dict()
+        }
+        if master_process:
+            torch.save(state, ckpt_main_path)
+            print(f"Saved model checkpoint to {ckpt_main_path}")
+        
+        loader_state = {
+            'step': step,
+            'train': train_dataloader.state_dict(),
+            'valid': valid_dataloader.state_dict()
+        }
+        torch.save(loader_state, ckpt_rank_path)
+        print(f"[Rank {rank}]: Saved loader checkpoint to {ckpt_rank_path}")
+
+    step += 1
