@@ -149,8 +149,10 @@ class Transformer(nn.Module):
         self.generator.proj.weight = self.tok_embed.lut.weight
 
     def forward(self, src, tgt, src_mask, tgt_mask):
-        encoded = self.encoder(src, src_mask)
-        decoded = self.decoder(encoded, src_mask, tgt, tgt_mask)
+        src_emb = self.embed(src)
+        tgt_emb = self.embed(tgt)
+        encoded = self.encoder(src_emb, src_mask)
+        decoded = self.decoder(tgt_emb, encoded, src_mask, tgt_mask)
         return self.generator(decoded)
     
     def embed(self, x):
