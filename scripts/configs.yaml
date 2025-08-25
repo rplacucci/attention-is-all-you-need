@@ -1,6 +1,6 @@
 base:
   n_layers: 6
-  max_len: 512
+  max_len: 128
   embed_size: 512
   ff_size: 2048
   attn_heads: 8
@@ -8,7 +8,7 @@ base:
 
 big:
   n_layers: 6
-  max_len: 512
+  max_len: 128
   embed_size: 1024
   ff_size: 4096
   attn_heads: 16
