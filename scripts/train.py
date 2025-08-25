@@ -18,7 +18,7 @@ from datasets import load_dataset
 from tokenizers import Tokenizer
 
 from src.model import Transformer
-from src.utils import LabelSmoothing, greedy_decode
+from src.utils import LabelSmoothing, greedy_decode, causal_mask, causal_shift
 from src.dataset import WMT14Dataset
 from src.scheduler import InverseSqrtLR
 
@@ -158,6 +158,14 @@ total_steps = 300000 if args.model_config == 'big' else 100000
 if master_process:
     print(f"Total training steps set to {total_steps:,}")
 
+# Set gradient accumulation steps
+grad_accum_steps = 1
+if master_process:
+    print(f"Grad accumulation steps set to: {grad_accum_steps}")
+
+# Define loss criterion
+criterion = LabelSmoothing(vocab_size=vocab_size, smoothing=0.1)
+
 # Define optimizer and learning rate schedule
 betas = (0.9, 0.98)
 eps = 1e-9
@@ -216,6 +224,56 @@ step = start_step
 for batch in train_dataloader:
     if step >= total_steps:
         break
+
+    # Train model
+    model.train()
+    start = time.time()
+    optimizer.zero_grad()
+
+    loss_accum = 0.0    # src, tgt, src_mask, tgt_mask
+    for accum_step in range(grad_accum_steps):
+        batch = {k: v.to(device) for k, v in batch.items()}
+
+        src, src_mask = batch['src_ids'], batch['src_mask']
+        tgt, tgt_mask = batch['tgt_ids'], batch['tgt_mask']
+
+        tgt_x, tgt_x_mask, tgt_y, tgt_y_mask = causal_shift(tgt, tgt_mask)
+
+        with torch.autocast(device_type=device, dtype=torch.bfloat16, enabled=False):
+            out = model(src, tgt_x, src_mask, tgt_x_mask)
+
+        loss = criterion(
+            out.reshape(-1, out.size(-1)),          # [B*(T-1), V]
+            tgt_y.reshape(-1),                      # [B*(T-1)]
+            tgt_y_mask.reshape(-1)                  # [B*(T-1)]
+        )
+
+        loss = loss / grad_accum_steps
+        loss_accum += loss.detach()
+        if distributed:
+            model.require_backward_grad_sync = (accum_step == grad_accum_steps - 1)
+        loss.backward()
+
+    if distributed:
+        dist.all_reduce(loss_accum, op=dist.ReduceOp.AVG)
+    norm = torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
+    scheduler.step()
+    optimizer.step()
+    
+    torch.cuda.synchronize()
+    elapsed = time.time() - start
+    tokens_per_sec = int(batch_size * max_len * grad_accum_steps * world_size / elapsed) if elapsed > 0 else 0
+
+    loss = loss_accum.item()
+    lr = scheduler.get_lr()[0]
+
+    if master_process:
+        print(f"(train) step: {step:6d}/{total_steps} | loss: {loss:.4f} | lr: {lr:.4e} | norm: {norm:.4f} | tok/sec: {tokens_per_sec:07,d}")
+        writer.add_scalar("loss", loss, step)
+        writer.add_scalar("lr", lr, step)
+
+    if distributed:
+        dist.barrier()
 
     # Save checkpoint
     if step % ckpt_steps == 0 and step > 0:
