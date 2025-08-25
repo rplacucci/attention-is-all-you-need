@@ -82,6 +82,14 @@ class MultiHeadAttention(nn.Module):
             for lin, x in zip(self.lins, (query, key, value))
         ]
         # Compute attention
+        scores = torch.matmul(query, key.transpose(-2, -1)) / math.sqrt(self.head_size)
+        if mask is not None:
+            # mask shape: (batch_size, seq_len) -> (batch_size, 1, 1, seq_len)
+            if mask.dim() == 2:
+                mask = mask.unsqueeze(1).unsqueeze(2)
+            elif mask.dim() == 3:
+                mask = mask.unsqueeze(1)
+            scores = scores.masked_fill(mask == 0, float('-inf'))
         x, self.attn = self.attention(query, key, value, mask=mask, dropout=self.dropout)
         # Concatenate heads and project
         x = (
