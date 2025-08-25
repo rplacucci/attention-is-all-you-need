@@ -219,6 +219,7 @@ if distributed:
 
 # Begin traning loop
 ckpt_steps = 100
+valid_steps = 200
 step = start_step
 
 for batch in train_dataloader:
@@ -230,7 +231,7 @@ for batch in train_dataloader:
     start = time.time()
     optimizer.zero_grad()
 
-    loss_accum = 0.0    # src, tgt, src_mask, tgt_mask
+    loss_accum = 0.0
     for accum_step in range(grad_accum_steps):
         batch = {k: v.to(device) for k, v in batch.items()}
 
@@ -248,7 +249,7 @@ for batch in train_dataloader:
             tgt_y_mask.reshape(-1)                  # [B*(T-1)]
         )
 
-        loss = loss / grad_accum_steps
+        loss /= grad_accum_steps
         loss_accum += loss.detach()
         if distributed:
             model.require_backward_grad_sync = (accum_step == grad_accum_steps - 1)
@@ -269,11 +270,40 @@ for batch in train_dataloader:
 
     if master_process:
         print(f"(train) step: {step:6d}/{total_steps} | loss: {loss:.4f} | lr: {lr:.4e} | norm: {norm:.4f} | tok/sec: {tokens_per_sec:07,d}")
-        writer.add_scalar("loss", loss, step)
+        writer.add_scalar("loss/train", loss, step)
         writer.add_scalar("lr", lr, step)
 
     if distributed:
         dist.barrier()
+
+    # Validate model
+    if step % valid_steps == 0 and step > 0:
+        model.eval()
+        val_loss_accum = 0.0
+        with torch.no_grad():
+            for batch in valid_dataloader:
+                batch = {k: v.to(device) for k, v in batch.items()}
+
+                with torch.autocast(device_type=device, dtype=torch.bfloat16, enabled=True):
+                    out = model(src, tgt_x, src_mask, tgt_x_mask)
+
+                loss = criterion(
+                    out.reshape(-1, out.size(-1)),          # [B*(T-1), V]
+                    tgt_y.reshape(-1),                      # [B*(T-1)]
+                    tgt_y_mask.reshape(-1)                  # [B*(T-1)]
+                )
+
+                loss /= len(valid_dataloader)
+                val_loss_accum += loss.detach()
+
+        if distributed:
+            dist.all_reduce(loss_accum, op=dist.ReduceOp.AVG)
+
+        val_loss = val_loss_accum.item()
+
+        if master_process:
+            print(f"(valid) step: {step:6d}/{total_steps} | loss: {val_loss:.4f}")
+            writer.add_scalar("loss/valid",val_loss, step)
 
     # Save checkpoint
     if step % ckpt_steps == 0 and step > 0:
@@ -286,6 +316,10 @@ for batch in train_dataloader:
         if master_process:
             torch.save(state, ckpt_main_path)
             print(f"Saved model checkpoint to {ckpt_main_path}")
+
+        time.sleep(1)
+        if distributed:
+            dist.barrier()
         
         loader_state = {
             'step': step,
@@ -294,5 +328,9 @@ for batch in train_dataloader:
         }
         torch.save(loader_state, ckpt_rank_path)
         print(f"[Rank {rank}]: Saved loader checkpoint to {ckpt_rank_path}")
+
+        time.sleep(1)
+        if distributed:
+            dist.barrier()
 
     step += 1
