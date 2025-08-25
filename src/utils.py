@@ -11,19 +11,36 @@ class LabelSmoothing(nn.Module):
         self.true_dist = None
 
     def forward(self, x, target, target_mask):      # x: [B*T, V] log-probs, target: [B*T] indices
-        assert x.size(1) == self.vocab_size         # target_mask: [B*T]        
+        # Only keep valid positions
+        valid_idx = target_mask.bool()
+        x = x[valid_idx]
+        target = target[valid_idx]
         true_dist = torch.full_like(x, fill_value=self.smoothing / (self.vocab_size - 1))
         true_dist.scatter_(1, target.unsqueeze(1), self.confidence)
-
-        # zero out rows where mask == 0
-        true_dist[~target_mask.bool()] = 0.0
         self.true_dist = true_dist
-        return self.criterion(x, true_dist.detach())
+        loss = self.criterion(x, true_dist.detach())
+        # Normalize by number of non-padding tokens
+        denom = valid_idx.sum().item()
+        if denom > 0:
+            loss = loss / denom
+        return loss
 
 def causal_mask(seq_len):
     attn_shape = (1, seq_len, seq_len)                             
     attn_mask = torch.tril(torch.ones(attn_shape, dtype=torch.bool))
     return attn_mask
+
+def causal_shift(tgt, tgt_mask):
+    tgt_x = tgt[:, :-1]
+    tgt_y = tgt[:,  1:]
+    tgt_x_mask = tgt_mask[:, :-1].to(torch.bool)
+    tgt_y_mask = tgt_mask[:,  1:].to(torch.bool)
+
+    T = tgt_x.size(1)
+    causal = causal_mask(T).to(tgt.device)
+    tgt_x_mask = tgt_x_mask[:, None, None, :] & causal[None, None, :, :]
+
+    return tgt_x, tgt_x_mask, tgt_y, tgt_y_mask
     
 def greedy_decode(model, src, src_mask, max_len, sos_id=0):
     # Encode source
