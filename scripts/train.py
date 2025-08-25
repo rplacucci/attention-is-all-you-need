@@ -219,6 +219,7 @@ if distributed:
 
 # Begin traning loop
 ckpt_steps = 100
+save_steps = 10000
 valid_steps = 200
 step = start_step
 
@@ -333,4 +334,49 @@ for batch in train_dataloader:
         if distributed:
             dist.barrier()
 
+    # Save intermediate model
+    if step & save_steps == 0 and step > 0:
+        if master_process:
+            torch.save(
+                model.module.state_dict() if distributed else model.state_dict(),
+                os.path.join(out_dir, f"model_{step:6d}.pt")
+            )
+            print(f"Saved model to {out_dir}")
+
     step += 1
+
+# Save final model
+if master_process:
+    torch.save(
+        model.module.state_dict() if distributed else model.state_dict(),
+        os.path.join(out_dir, "model.pt")
+    )
+    print(f"Saved final model to {out_dir}")
+
+if distributed:
+    dist.barrier()
+
+# Cleanup distributed processing
+if master_process:
+    print("Cleaning up...")
+
+if writer is not None:
+    writer.flush()
+    writer.close()
+
+del model, optimizer, scheduler
+del train_dataset, train_sampler, train_dataloader
+del valid_dataset, valid_sampler, valid_dataloader
+del tokenizer, writer
+
+torch.cuda.empty_cache()
+
+if distributed:
+    torch.cuda.set_device(local_rank)
+    dist.barrier()
+    destroy_process_group()
+
+if master_process:
+    print("Goodbye!")
+
+time.sleep(1)
