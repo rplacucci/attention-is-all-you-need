@@ -223,31 +223,65 @@ save_steps = 10000
 valid_steps = 200
 step = start_step
 
-for batch in train_dataloader:
-    if step >= total_steps:
-        break
+train_dataiter = iter(train_dataloader)
+while step < total_steps:
+    # Validate model
+    if step % valid_steps == 0:
+        model.eval()
+        val_loss_accum = 0.0
+        with torch.no_grad():
+            for batch in valid_dataloader:
+                batch = {k: v.to(device) for k, v in batch.items()}
+                src, src_mask = batch['src_ids'], batch['src_mask']
+                tgt, tgt_mask = batch['tgt_ids'], batch['tgt_mask']
+                tgt_x, tgt_x_mask, tgt_y, tgt_y_mask = causal_shift(tgt, tgt_mask)
+
+                with torch.autocast(device_type=device, dtype=torch.bfloat16, enabled=True):
+                    out = model(src, tgt_x, src_mask, tgt_x_mask)
+
+                loss = criterion(
+                    out.reshape(-1, out.size(-1)),
+                    tgt_y.reshape(-1),
+                    tgt_y_mask.reshape(-1)
+                )
+
+                loss /= len(valid_dataloader)
+                val_loss_accum += loss.detach()
+
+        if distributed:
+            dist.all_reduce(val_loss_accum, op=dist.ReduceOp.AVG)
+
+        val_loss = val_loss_accum.item()
+
+        if master_process:
+            print(f"(valid) step: {step:6d}/{total_steps} | loss: {val_loss:.4f}")
+            writer.add_scalar("loss/valid", val_loss, step)
 
     # Train model
     model.train()
+    try:
+        batch = next(train_dataiter)
+    except StopIteration:
+        train_dataiter = iter(train_dataloader)
+        batch = next(train_dataiter)
+
     start = time.time()
     optimizer.zero_grad()
 
     loss_accum = 0.0
     for accum_step in range(grad_accum_steps):
         batch = {k: v.to(device) for k, v in batch.items()}
-
         src, src_mask = batch['src_ids'], batch['src_mask']
         tgt, tgt_mask = batch['tgt_ids'], batch['tgt_mask']
-
         tgt_x, tgt_x_mask, tgt_y, tgt_y_mask = causal_shift(tgt, tgt_mask)
 
-        with torch.autocast(device_type=device, dtype=torch.bfloat16, enabled=False):
+        with torch.autocast(device_type=device, dtype=torch.bfloat16, enabled=True):
             out = model(src, tgt_x, src_mask, tgt_x_mask)
 
         loss = criterion(
-            out.reshape(-1, out.size(-1)),          # [B*(T-1), V]
-            tgt_y.reshape(-1),                      # [B*(T-1)]
-            tgt_y_mask.reshape(-1)                  # [B*(T-1)]
+            out.reshape(-1, out.size(-1)),
+            tgt_y.reshape(-1),
+            tgt_y_mask.reshape(-1)
         )
 
         loss /= grad_accum_steps
@@ -276,35 +310,6 @@ for batch in train_dataloader:
 
     if distributed:
         dist.barrier()
-
-    # Validate model
-    if step % valid_steps == 0 and step > 0:
-        model.eval()
-        val_loss_accum = 0.0
-        with torch.no_grad():
-            for batch in valid_dataloader:
-                batch = {k: v.to(device) for k, v in batch.items()}
-
-                with torch.autocast(device_type=device, dtype=torch.bfloat16, enabled=True):
-                    out = model(src, tgt_x, src_mask, tgt_x_mask)
-
-                loss = criterion(
-                    out.reshape(-1, out.size(-1)),          # [B*(T-1), V]
-                    tgt_y.reshape(-1),                      # [B*(T-1)]
-                    tgt_y_mask.reshape(-1)                  # [B*(T-1)]
-                )
-
-                loss /= len(valid_dataloader)
-                val_loss_accum += loss.detach()
-
-        if distributed:
-            dist.all_reduce(loss_accum, op=dist.ReduceOp.AVG)
-
-        val_loss = val_loss_accum.item()
-
-        if master_process:
-            print(f"(valid) step: {step:6d}/{total_steps} | loss: {val_loss:.4f}")
-            writer.add_scalar("loss/valid",val_loss, step)
 
     # Save checkpoint
     if step % ckpt_steps == 0 and step > 0:
@@ -335,7 +340,7 @@ for batch in train_dataloader:
             dist.barrier()
 
     # Save intermediate model
-    if step & save_steps == 0 and step > 0:
+    if step % save_steps == 0 and step > 0:
         if master_process:
             torch.save(
                 model.module.state_dict() if distributed else model.state_dict(),
