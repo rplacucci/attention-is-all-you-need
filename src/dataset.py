@@ -31,8 +31,10 @@ class WMT14Dataset(Dataset):
         tgt_mask = torch.tensor(tgt_enc.attention_mask, dtype=torch.long)
 
         return {
+            'src_text': src_text,
             'src_ids': src_ids,
             'src_mask': src_mask,
+            'tgt_text': tgt_text,
             'tgt_ids': tgt_ids,
             'tgt_mask': tgt_mask
         }
