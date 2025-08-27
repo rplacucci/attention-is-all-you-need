@@ -5,6 +5,7 @@ import yaml
 import argparse
 
 import torch
+import torch.nn as nn
 import torch.distributed as dist
 from torch.distributed import init_process_group, destroy_process_group
 from torch.nn.parallel import DistributedDataParallel as DDP
@@ -18,7 +19,7 @@ from datasets import load_dataset
 from tokenizers import Tokenizer
 
 from src.model import Transformer
-from src.utils import LabelSmoothing, greedy_decode, causal_mask, causal_shift
+from src.utils import causal_shift
 from src.dataset import WMT14Dataset
 from src.scheduler import InverseSqrtLR
 
@@ -164,7 +165,8 @@ if master_process:
     print(f"Grad accumulation steps set to: {grad_accum_steps}")
 
 # Define loss criterion
-criterion = LabelSmoothing(vocab_size=vocab_size, smoothing=0.1)
+pad_token_id = tokenizer.token_to_id("<pad>")
+criterion = nn.CrossEntropyLoss(ignore_index=pad_token_id, label_smoothing=0.1)
 
 # Define optimizer and learning rate schedule
 betas = (0.9, 0.98)
@@ -217,7 +219,7 @@ time.sleep(3)
 if distributed:
     dist.barrier()
 
-# Begin traning loop
+# Begin training loop
 ckpt_steps = 100
 save_steps = 10000
 valid_steps = 200
@@ -236,13 +238,12 @@ while step < total_steps:
                 tgt, tgt_mask = batch['tgt_ids'], batch['tgt_mask']
                 tgt_x, tgt_x_mask, tgt_y, tgt_y_mask = causal_shift(tgt, tgt_mask)
 
-                with torch.autocast(device_type=device, dtype=torch.bfloat16, enabled=True):
-                    out = model(src, tgt_x, src_mask, tgt_x_mask)
+                with torch.autocast(device_type=device, dtype=torch.bfloat16, enabled=False):
+                    logits = model(src, tgt_x, src_mask, tgt_x_mask)
 
                 loss = criterion(
-                    out.reshape(-1, out.size(-1)),
-                    tgt_y.reshape(-1),
-                    tgt_y_mask.reshape(-1)
+                    logits.reshape(-1, logits.size(-1)),
+                    tgt_y.reshape(-1)
                 )
 
                 loss /= len(valid_dataloader)
@@ -275,13 +276,12 @@ while step < total_steps:
         tgt, tgt_mask = batch['tgt_ids'], batch['tgt_mask']
         tgt_x, tgt_x_mask, tgt_y, tgt_y_mask = causal_shift(tgt, tgt_mask)
 
-        with torch.autocast(device_type=device, dtype=torch.bfloat16, enabled=True):
-            out = model(src, tgt_x, src_mask, tgt_x_mask)
+        with torch.autocast(device_type=device, dtype=torch.bfloat16, enabled=False):
+            logits = model(src, tgt_x, src_mask, tgt_x_mask)
 
         loss = criterion(
-            out.reshape(-1, out.size(-1)),
-            tgt_y.reshape(-1),
-            tgt_y_mask.reshape(-1)
+            logits.reshape(-1, logits.size(-1)),
+            tgt_y.reshape(-1)
         )
 
         loss /= grad_accum_steps

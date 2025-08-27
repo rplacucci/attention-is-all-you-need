@@ -131,7 +131,8 @@ class Generator(nn.Module):
         self.proj = nn.Linear(embed_size, vocab_size, bias=False)
 
     def forward(self, x):
-        return F.log_softmax(self.proj(x), dim=-1)  # log-softmax + KL div
+        # return F.log_softmax(self.proj(x), dim=-1)  # log-softmax + KL div
+        return self.proj(x)     # logits + cross entropy
     
 class Transformer(nn.Module):
     def __init__(self, n_layers, max_len, vocab_size, embed_size, ff_size, attn_heads, dropout):
