@@ -233,7 +233,7 @@ while step < total_steps:
         val_loss_accum = 0.0
         with torch.no_grad():
             for batch in valid_dataloader:
-                batch = {k: v.to(device) for k, v in batch.items()}
+                batch = {k: v.to(device) for k, v in batch.items() if isinstance(v, torch.Tensor)}
                 src, src_mask = batch['src_ids'], batch['src_mask']
                 tgt, tgt_mask = batch['tgt_ids'], batch['tgt_mask']
                 tgt_x, tgt_x_mask, tgt_y, tgt_y_mask = causal_shift(tgt, tgt_mask)
@@ -271,7 +271,7 @@ while step < total_steps:
 
     loss_accum = 0.0
     for accum_step in range(grad_accum_steps):
-        batch = {k: v.to(device) for k, v in batch.items()}
+        batch = {k: v.to(device) for k, v in batch.items() if isinstance(v, torch.Tensor)}
         src, src_mask = batch['src_ids'], batch['src_mask']
         tgt, tgt_mask = batch['tgt_ids'], batch['tgt_mask']
         tgt_x, tgt_x_mask, tgt_y, tgt_y_mask = causal_shift(tgt, tgt_mask)
