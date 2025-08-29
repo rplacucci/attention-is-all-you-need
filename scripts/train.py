@@ -181,8 +181,8 @@ if master_process:
     print(f"Loaded {scheduler.__class__.__name__} learning rate scheduler")
 
 # Setup tensorboard and directories for logging/saving
-out_dir = f"./models/transformer-{args.model_config}-{lang_pair}"
-log_dir = f"./logs/transformer-{args.model_config}-{lang_pair}"
+out_dir = f"./models/{args.model_config}-{lang_pair}"
+log_dir = f"./logs/{args.model_config}-{lang_pair}"
 
 if master_process:
     writer = SummaryWriter(log_dir)
@@ -196,16 +196,28 @@ start_step = 0
 ckpt_main_path = os.path.join(out_dir, "ckpt.pt")
 ckpt_rank_path = os.path.join(out_dir, f"ckpt_rank{rank}.pt")
 
-if master_process and os.path.exists(ckpt_main_path):
-    print(f"Found model checkpoint at {ckpt_main_path}")
-    state = torch.load(ckpt_main_path, map_location='cpu')
+if os.path.exists(ckpt_main_path):
+    if master_process:
+        print(f"Found model checkpoint at {ckpt_main_path}")
+
+    state = torch.load(ckpt_main_path, map_location=device)
 
     model.module.load_state_dict(state['model']) if distributed else model.load_state_dict(state['model'])
     optimizer.load_state_dict(state['optimizer'])
     scheduler.load_state_dict(state['scheduler'])
-    start_step = state['step'] + 1
 
-    print(f"Resuming from step {start_step}")
+    # restore bookkeeping
+    start_step = state['step'] + 1
+    loss = state['loss']
+
+    if master_process:
+        print(f"Resuming from step {start_step}")
+
+    # broadcast loaded weights to all ranks
+    if distributed:  
+        for param in model.parameters():  
+            dist.broadcast(param.data, src=0)
+        dist.barrier()
 
 if os.path.exists(ckpt_rank_path):
     print(f"Found loader checkpoint at {ckpt_rank_path}")
@@ -230,7 +242,7 @@ while step < total_steps:
     # Validate model
     if step % valid_steps == 0:
         model.eval()
-        val_loss_accum = 0.0
+        val_loss_accum = torch.tensor(0.0, device=device)
         with torch.no_grad():
             for batch in valid_dataloader:
                 batch = {k: v.to(device) for k, v in batch.items() if isinstance(v, torch.Tensor)}
@@ -269,7 +281,7 @@ while step < total_steps:
     start = time.time()
     optimizer.zero_grad()
 
-    loss_accum = 0.0
+    loss_accum = torch.tensor(0.0, device=device)
     for accum_step in range(grad_accum_steps):
         batch = {k: v.to(device) for k, v in batch.items() if isinstance(v, torch.Tensor)}
         src, src_mask = batch['src_ids'], batch['src_mask']
@@ -315,6 +327,7 @@ while step < total_steps:
     if step % ckpt_steps == 0 and step > 0:
         state = {
             'step': step,
+            'loss': loss,
             'model': model.module.state_dict() if distributed else model.state_dict(),
             'optimizer': optimizer.state_dict(),
             'scheduler': scheduler.state_dict()
