@@ -37,8 +37,8 @@ def causal_shift(tgt, tgt_mask):
     tgt_y_mask = tgt_mask[:,  1:].to(torch.bool)
 
     T = tgt_x.size(1)
-    causal = causal_mask(T).to(tgt.device)
-    tgt_x_mask = tgt_x_mask[:, None, None, :] & causal[None, None, :, :]
+    causal = causal_mask(T).to(tgt.device)  # [1, T, T]
+    tgt_x_mask = tgt_x_mask[:, None, None, :] & causal  # [batch, 1, T, T]
 
     return tgt_x, tgt_x_mask, tgt_y, tgt_y_mask
     
