@@ -30,6 +30,7 @@ parser = argparse.ArgumentParser(description="Train the original Transformer for
 parser.add_argument("--model_config", type=str, default="base", help="Size of model from configs.yaml ('base' or 'big')")
 parser.add_argument("--lang", type=str, default="de", help="Langauge to translate to/from English ('cs', 'de', 'fr', 'hi', 'ru)")
 parser.add_argument("--batch_size", type=int, default=32, help="Number of samples per training step (16, 32, 64, etc.)")
+parser.add_argument("--grad_accum_steps", type=int, default=25, help="Number of gradient accumulation steps to hit ~25K non-pad tokens per iteration")
 args = parser.parse_args()
 
 # Initialize distributed processing
@@ -160,9 +161,9 @@ if master_process:
     print(f"Total training steps set to {total_steps:,}")
 
 # Set gradient accumulation steps
-grad_accum_steps = 1
+grad_accum_steps = args.grad_accum_steps
 if master_process:
-    print(f"Grad accumulation steps set to: {grad_accum_steps}")
+    print(f"Grad accumulation steps set to {grad_accum_steps}")
 
 # Define loss criterion
 pad_token_id = tokenizer.token_to_id("<pad>")
@@ -181,8 +182,8 @@ if master_process:
     print(f"Loaded {scheduler.__class__.__name__} learning rate scheduler")
 
 # Setup tensorboard and directories for logging/saving
-out_dir = f"./models/{args.model_config}-{lang_pair}"
-log_dir = f"./logs/{args.model_config}-{lang_pair}"
+out_dir = f"./models/{args.model_config}-{lang_pair}-accum-{grad_accum_steps}"
+log_dir = f"./logs/{args.model_config}-{lang_pair}-accum-{grad_accum_steps}"
 
 if master_process:
     writer = SummaryWriter(log_dir)
@@ -272,17 +273,17 @@ while step < total_steps:
 
     # Train model
     model.train()
-    try:
-        batch = next(train_dataiter)
-    except StopIteration:
-        train_dataiter = iter(train_dataloader)
-        batch = next(train_dataiter)
-
     start = time.time()
     optimizer.zero_grad()
 
     loss_accum = torch.tensor(0.0, device=device)
     for accum_step in range(grad_accum_steps):
+        try:
+            batch = next(train_dataiter)
+        except StopIteration:
+            train_dataiter = iter(train_dataloader)
+            batch = next(train_dataiter)
+
         batch = {k: v.to(device) for k, v in batch.items() if isinstance(v, torch.Tensor)}
         src, src_mask = batch['src_ids'], batch['src_mask']
         tgt, tgt_mask = batch['tgt_ids'], batch['tgt_mask']
