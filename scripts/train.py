@@ -20,7 +20,7 @@ from datasets import Dataset, load_dataset
 from tokenizers import Tokenizer
 
 from src.model import Transformer
-from src.utils import causal_shift
+from src.utils import make_src_allow_mask, make_tgt_allow_mask
 from src.dataset import WMT14Dataset
 from src.scheduler import InverseSqrtLR
 from src.bucket import BucketConfig, BucketSampler
@@ -202,7 +202,7 @@ if master_process:
 
 # Define loss criterion
 pad_token_id = tokenizer.token_to_id("<pad>")
-criterion = nn.CrossEntropyLoss(ignore_index=pad_token_id, label_smoothing=0.1)
+criterion = nn.CrossEntropyLoss(ignore_index=pad_token_id, label_smoothing=0.1, reduction="none")
 
 # Define optimizer and learning rate schedule
 betas = (0.9, 0.98)
@@ -217,8 +217,8 @@ if master_process:
     print(f"Loaded {scheduler.__class__.__name__} learning rate scheduler")
 
 # Setup tensorboard and directories for logging/saving
-out_dir = f"./models/{args.model_config}-{lang_pair}"
-log_dir = f"./logs/{args.model_config}-{lang_pair}"
+out_dir = f"./models/{args.model_config}-{lang_pair}-v2"
+log_dir = f"./logs/{args.model_config}-{lang_pair}-v2"
 
 if master_process:
     writer = SummaryWriter(log_dir)
@@ -294,9 +294,12 @@ while step < total_steps:
         with torch.no_grad():
             for batch in valid_dataloader:
                 batch = {k: v.to(device) for k, v in batch.items() if isinstance(v, torch.Tensor)}
-                src, src_mask = batch['src_ids'], batch['src_mask']
-                tgt, tgt_mask = batch['tgt_ids'], batch['tgt_mask']
-                tgt_x, tgt_x_mask, tgt_y, tgt_y_mask = causal_shift(tgt, tgt_mask)
+                src, tgt = batch["src_ids"], batch["tgt_ids"]
+
+                src_mask = make_src_allow_mask(src, pad_token_id)
+                tgt_x = tgt[:, :-1]
+                tgt_y = tgt[:,  1:]
+                tgt_x_mask = make_tgt_allow_mask(tgt, pad_token_id)
 
                 with torch.autocast(device_type=device, dtype=torch.bfloat16, enabled=False):
                     logits = model(src, tgt_x, src_mask, tgt_x_mask)
@@ -336,9 +339,12 @@ while step < total_steps:
             batch = next(train_dataiter)
 
         batch = {k: v.to(device) for k, v in batch.items() if isinstance(v, torch.Tensor)}
-        src, src_mask = batch['src_ids'], batch['src_mask']
-        tgt, tgt_mask = batch['tgt_ids'], batch['tgt_mask']
-        tgt_x, tgt_x_mask, tgt_y, tgt_y_mask = causal_shift(tgt, tgt_mask)
+        src, tgt = batch["src_ids"], batch["tgt_ids"]
+
+        src_mask = make_src_allow_mask(src, pad_token_id)
+        tgt_x = tgt[:, :-1]
+        tgt_y = tgt[:,  1:]
+        tgt_x_mask = make_tgt_allow_mask(tgt, pad_token_id)
 
         with torch.autocast(device_type=device, dtype=torch.bfloat16, enabled=False):
             logits = model(src, tgt_x, src_mask, tgt_x_mask)
