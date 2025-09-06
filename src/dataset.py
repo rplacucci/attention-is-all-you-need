@@ -10,7 +10,7 @@ class WMT14Dataset(Dataset):
         self.tgt_lang = tgt_lang
 
         # Truncate or pad to max_len
-        self.tokenizer.enable_padding(pad_id=tokenizer.token_to_id(pad_token), pad_token=pad_token, length=max_len)
+        self.tokenizer.enable_padding(pad_id=tokenizer.token_to_id(pad_token), pad_token=pad_token)
         self.tokenizer.enable_truncation(max_length=max_len)
 
     def __len__(self):
@@ -31,10 +31,8 @@ class WMT14Dataset(Dataset):
         tgt_mask = torch.tensor(tgt_enc.attention_mask, dtype=torch.long)
 
         return {
-            'src_text': src_text,
             'src_ids': src_ids,
             'src_mask': src_mask,
-            'tgt_text': tgt_text,
             'tgt_ids': tgt_ids,
             'tgt_mask': tgt_mask
         }

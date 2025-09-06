@@ -7,6 +7,7 @@ import argparse
 import torch
 import torch.nn as nn
 import torch.distributed as dist
+import numpy as np
 from torch.distributed import init_process_group, destroy_process_group
 from torch.nn.parallel import DistributedDataParallel as DDP
 from torchdata.stateful_dataloader import StatefulDataLoader
@@ -15,13 +16,15 @@ from torch.utils.tensorboard import SummaryWriter
 from torch.optim import Adam
 
 from tqdm import tqdm
-from datasets import load_dataset
+from datasets import Dataset, load_dataset
 from tokenizers import Tokenizer
 
 from src.model import Transformer
 from src.utils import causal_shift
 from src.dataset import WMT14Dataset
 from src.scheduler import InverseSqrtLR
+from src.bucket import BucketConfig, BucketSampler
+from src.collate import pad_collate
 
 # torchrun --standalone --nproc-per-node=4 -m scripts.train
 
@@ -30,7 +33,7 @@ parser = argparse.ArgumentParser(description="Train the original Transformer for
 parser.add_argument("--model_config", type=str, default="base", help="Size of model from configs.yaml ('base' or 'big')")
 parser.add_argument("--lang", type=str, default="de", help="Langauge to translate to/from English ('cs', 'de', 'fr', 'hi', 'ru)")
 parser.add_argument("--batch_size", type=int, default=32, help="Number of samples per training step (16, 32, 64, etc.)")
-parser.add_argument("--grad_accum_steps", type=int, default=25, help="Number of gradient accumulation steps to hit ~25K non-pad tokens per iteration")
+parser.add_argument("--grad_accum_steps", type=int, default=1, help="Number of gradient accumulation steps to hit ~25K non-pad tokens per iteration")
 args = parser.parse_args()
 
 # Initialize distributed processing
@@ -70,8 +73,9 @@ lang_b = "en"
 lang_pair = f"{lang_a}-{lang_b}"
 
 path_vocab = f"./vocab/wmt14_{lang_pair}/bpe_{lang_pair}.json"
-if not os.path.exists(path_vocab):
+if not os.path.exists(path_vocab) and master_process:
     print(f"Tokenizer file {path_vocab} does not exist. Run 'python -m vocab.build_vocab' and try again")
+    destroy_process_group()
     sys.exit(1)
 
 tokenizer = Tokenizer.from_file(path_vocab)
@@ -93,7 +97,7 @@ if distributed:
 print(f"Initialized model on {device}")
 time.sleep(0.5)
 
-# Get maximim sequence length and batch size
+# Get maximum sequence length and batch size
 batch_size = args.batch_size
 max_len = config['max_len']
 
@@ -106,6 +110,8 @@ if master_process:
     print(f"Loaded WMT14[{lang_pair}] dataset with {sum([len(wmt14[split]) for split in splits]):,} train/val sequence pairs")
 if distributed:
     dist.barrier()
+
+collate_fn = lambda batch: pad_collate(batch, pad_id=pad_token_id)
 
 train_dataset = WMT14Dataset(
     dataset=wmt14['train'],
@@ -123,12 +129,40 @@ train_sampler = StatefulDistributedSampler(
     seed=seed
 )
 
+path_cache = f"./vocab/wmt14_{lang_pair}/train_len_cache"
+if not os.path.exists(path_cache) and master_process:
+    print(f"Token lengths cache file {path_cache} does not exist. Run 'python -m vocab.survey' and try again")
+    destroy_process_group()
+    sys.exit(1)
+
+ds_len = Dataset.load_from_disk(path_cache)
+train_lengths = np.stack([ds_len["src_len"], ds_len["tgt_len"]], axis=1).astype("int32")
+time.sleep(3)
+
+if master_process:
+    print(f"Loaded train_lengths from {path_cache} with {train_lengths.shape[0]:,} train sequence pairs")
+if distributed:
+    dist.barrier()
+
+bucket_cfg = BucketConfig(
+    max_tokens=25000,
+    max_padded_tokens=24000,
+    bucket_size=4096,
+    drop_last=True,
+    allow_overshoot=512,
+    seed=42
+)
+
+bucket_sampler = BucketSampler(lengths=train_lengths, cfg=bucket_cfg)
+
 train_dataloader = StatefulDataLoader(
     dataset=train_dataset,
-    batch_size=batch_size,
-    sampler=train_sampler,
-    num_workers=0,
-    prefetch_factor=None
+    batch_sampler=bucket_sampler,
+    num_workers=8,
+    pin_memory=True,
+    prefetch_factor=4,
+    persistent_workers=True,
+    collate_fn=collate_fn
 )
 
 valid_dataset = WMT14Dataset(
@@ -152,7 +186,8 @@ valid_dataloader = StatefulDataLoader(
     batch_size=batch_size,
     sampler=valid_sampler,
     num_workers=0,
-    prefetch_factor=None
+    prefetch_factor=None,
+    collate_fn=collate_fn
 )
 
 # Define number of training iterations
@@ -182,8 +217,8 @@ if master_process:
     print(f"Loaded {scheduler.__class__.__name__} learning rate scheduler")
 
 # Setup tensorboard and directories for logging/saving
-out_dir = f"./models/{args.model_config}-{lang_pair}-accum-{grad_accum_steps}"
-log_dir = f"./logs/{args.model_config}-{lang_pair}-accum-{grad_accum_steps}"
+out_dir = f"./models/{args.model_config}-{lang_pair}"
+log_dir = f"./logs/{args.model_config}-{lang_pair}"
 
 if master_process:
     writer = SummaryWriter(log_dir)
@@ -193,6 +228,7 @@ if distributed:
     dist.barrier()
 
 # Resume from checkpoint if available
+epoch = 0
 start_step = 0
 ckpt_main_path = os.path.join(out_dir, "ckpt.pt")
 ckpt_rank_path = os.path.join(out_dir, f"ckpt_rank{rank}.pt")
@@ -208,6 +244,7 @@ if os.path.exists(ckpt_main_path):
     scheduler.load_state_dict(state['scheduler'])
 
     # restore bookkeeping
+    epoch = state['epoch']
     start_step = state['step'] + 1
     loss = state['loss']
 
@@ -222,12 +259,22 @@ if os.path.exists(ckpt_main_path):
 
 if os.path.exists(ckpt_rank_path):
     print(f"Found loader checkpoint at {ckpt_rank_path}")
-    state = torch.load(ckpt_rank_path, map_location=device)
+    loader_state = torch.load(ckpt_rank_path, map_location=device)
 
-    train_dataloader.load_state_dict(state['train'])
-    valid_dataloader.load_state_dict(state['valid'])
-    start_step = state['step'] + 1
+    epoch = loader_state['epoch']
+    start_step = loader_state['step'] + 1
 
+    # Rebuild train sampler before loading state
+    train_sampler.set_epoch(epoch)
+    bucket_sampler.set_epoch_indices(list(iter(train_sampler)), shuffle=False)
+
+    train_dataloader.load_state_dict(loader_state['train'])
+    valid_dataloader.load_state_dict(loader_state['valid'])
+else:
+    epoch = 0
+    train_sampler.set_epoch(epoch)
+    bucket_sampler.set_epoch_indices(list(iter(train_sampler)), shuffle=False)
+    
 time.sleep(3)
 if distributed:
     dist.barrier()
@@ -277,10 +324,14 @@ while step < total_steps:
     optimizer.zero_grad()
 
     loss_accum = torch.tensor(0.0, device=device)
+    non_pad_tokens = 0
     for accum_step in range(grad_accum_steps):
         try:
             batch = next(train_dataiter)
         except StopIteration:
+            epoch += 1
+            train_sampler.set_epoch(epoch)
+            bucket_sampler.set_epoch_indices(list(iter(train_sampler)), shuffle=False)
             train_dataiter = iter(train_dataloader)
             batch = next(train_dataiter)
 
@@ -303,6 +354,10 @@ while step < total_steps:
             model.require_backward_grad_sync = (accum_step == grad_accum_steps - 1)
         loss.backward()
 
+        src_tokens = int(batch['src_mask'].sum().item())
+        tgt_tokens = int(batch['tgt_mask'].sum().item())
+        non_pad_tokens += (src_tokens + tgt_tokens)
+
     if distributed:
         dist.all_reduce(loss_accum, op=dist.ReduceOp.AVG)
     norm = torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
@@ -317,7 +372,7 @@ while step < total_steps:
     lr = scheduler.get_lr()[0]
 
     if master_process:
-        print(f"(train) step: {step:6d}/{total_steps} | loss: {loss:.4f} | lr: {lr:.4e} | norm: {norm:.4f} | tok/sec: {tokens_per_sec:07,d}")
+        print(f"(train) step: {step:6d}/{total_steps} | loss: {loss:.4f} | lr: {lr:.4e} | norm: {norm:.4f} | tok: {non_pad_tokens:,} | tok/sec: {tokens_per_sec:07,d}")
         writer.add_scalar("loss/train", loss, step)
         writer.add_scalar("lr", lr, step)
 
@@ -327,6 +382,7 @@ while step < total_steps:
     # Save checkpoint
     if step % ckpt_steps == 0 and step > 0:
         state = {
+            'epoch': epoch,
             'step': step,
             'loss': loss,
             'model': model.module.state_dict() if distributed else model.state_dict(),
@@ -342,12 +398,13 @@ while step < total_steps:
             dist.barrier()
         
         loader_state = {
+            'epoch': epoch,
             'step': step,
             'train': train_dataloader.state_dict(),
             'valid': valid_dataloader.state_dict()
         }
         torch.save(loader_state, ckpt_rank_path)
-        print(f"[Rank {rank}]: Saved loader checkpoint to {ckpt_rank_path}")
+        print(f"Saved loader checkpoint to {ckpt_rank_path} on {device}")
 
         time.sleep(1)
         if distributed:
@@ -379,9 +436,9 @@ if distributed:
 if master_process:
     print("Cleaning up...")
 
-if writer is not None:
-    writer.flush()
-    writer.close()
+    if writer is not None:
+        writer.flush()
+        writer.close()
 
 del model, optimizer, scheduler
 del train_dataset, train_sampler, train_dataloader
