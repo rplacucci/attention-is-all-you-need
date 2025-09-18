@@ -1,3 +1,4 @@
+import math
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -167,16 +168,12 @@ class Transformer(nn.Module):
     
     @staticmethod
     def _init_weights(module: nn.Module):
-        """
-        Original Transformer-style init:
-          - Weights ~ U(-0.1, 0.1)
-          - Biases = 0
-          - LayerNorm: weight=1.0, bias=0.0
-        """
-        if isinstance(module, (nn.Linear, nn.Embedding)):
-            nn.init.uniform_(module.weight, -0.1, 0.1)
-            if isinstance(module, nn.Linear) and module.bias is not None:
-                nn.init.constant_(module.bias, 0.0)
+        if isinstance(module, nn.Linear):
+            nn.init.xavier_uniform_(module.weight)
+            if module.bias is not None:
+                nn.init.zeros_(module.bias)
+        elif isinstance(module, nn.Embedding):
+            d_model = module.weight.size(1)
+            nn.init.normal_(module.weight, mean=0.0, std=1.0 / math.sqrt(d_model))
         elif isinstance(module, nn.LayerNorm):
-            nn.init.constant_(module.bias, 0.0)
-            nn.init.constant_(module.weight, 1.0)
+            nn.init.ones_(module.weight)
