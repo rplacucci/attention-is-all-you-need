@@ -111,6 +111,7 @@ if master_process:
 if distributed:
     dist.barrier()
 
+pad_token_id = tokenizer.token_to_id("<pad>")
 collate_fn = lambda batch: pad_collate(batch, pad_id=pad_token_id)
 
 train_dataset = WMT14Dataset(
@@ -201,8 +202,7 @@ if master_process:
     print(f"Grad accumulation steps set to {grad_accum_steps}")
 
 # Define loss criterion
-pad_token_id = tokenizer.token_to_id("<pad>")
-criterion = nn.CrossEntropyLoss(ignore_index=pad_token_id, label_smoothing=0.1, reduction="none")
+criterion = nn.CrossEntropyLoss(ignore_index=pad_token_id, label_smoothing=0.1)
 
 # Define optimizer and learning rate schedule
 betas = (0.9, 0.98)
@@ -217,8 +217,8 @@ if master_process:
     print(f"Loaded {scheduler.__class__.__name__} learning rate scheduler")
 
 # Setup tensorboard and directories for logging/saving
-out_dir = f"./models/{args.model_config}-{lang_pair}-v2"
-log_dir = f"./logs/{args.model_config}-{lang_pair}-v2"
+out_dir = f"./models/{args.model_config}-{lang_pair}-grad_accum_steps-{grad_accum_steps}"
+log_dir = f"./logs/{args.model_config}-{lang_pair}-grad_accum_steps-{grad_accum_steps}"
 
 if master_process:
     writer = SummaryWriter(log_dir)
@@ -299,7 +299,7 @@ while step < total_steps:
                 src_mask = make_src_allow_mask(src, pad_token_id)
                 tgt_x = tgt[:, :-1]
                 tgt_y = tgt[:,  1:]
-                tgt_x_mask = make_tgt_allow_mask(tgt, pad_token_id)
+                tgt_x_mask = make_tgt_allow_mask(tgt_x, pad_token_id)
 
                 with torch.autocast(device_type=device, dtype=torch.bfloat16, enabled=False):
                     logits = model(src, tgt_x, src_mask, tgt_x_mask)
@@ -344,7 +344,7 @@ while step < total_steps:
         src_mask = make_src_allow_mask(src, pad_token_id)
         tgt_x = tgt[:, :-1]
         tgt_y = tgt[:,  1:]
-        tgt_x_mask = make_tgt_allow_mask(tgt, pad_token_id)
+        tgt_x_mask = make_tgt_allow_mask(tgt_x, pad_token_id)
 
         with torch.autocast(device_type=device, dtype=torch.bfloat16, enabled=False):
             logits = model(src, tgt_x, src_mask, tgt_x_mask)
