@@ -7,6 +7,7 @@ def pad_collate(batch, pad_id):
     tgt_ids = [b["tgt_ids"] for b in batch]
     src_mask = [b["src_mask"] for b in batch]
     tgt_mask = [b["tgt_mask"] for b in batch]
+    tgt_text = [b['tgt_text'] for b in batch]
 
     # Pad to max length found *in this batch*
     src_ids = pad_sequence(src_ids, batch_first=True, padding_value=pad_id)
@@ -18,5 +19,6 @@ def pad_collate(batch, pad_id):
         'src_ids': src_ids,
         'src_mask': src_mask,
         'tgt_ids': tgt_ids,
-        'tgt_mask': tgt_mask
+        'tgt_mask': tgt_mask,
+        'tgt_text': tgt_text
     }

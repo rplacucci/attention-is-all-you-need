@@ -33,6 +33,7 @@ class WMT14Dataset(Dataset):
         return {
             'src_ids': src_ids,
             'src_mask': src_mask,
+            'tgt_text': tgt_text,
             'tgt_ids': tgt_ids,
             'tgt_mask': tgt_mask
         }
