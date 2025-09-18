@@ -24,7 +24,7 @@ class Attention(nn.Module):
     def forward(self, query, key, value, mask=None, dropout=None):
         scores = torch.matmul(query, key.transpose(-2, -1)) / math.sqrt(query.size(-1))
         if mask is not None:
-            scores = scores.masked_fill(mask == 0, float('-inf'))
+            scores = scores.masked_fill(~mask, float('-inf'))
         attn = F.softmax(scores, dim=-1)
         if dropout is not None:
             attn = dropout(attn)
@@ -81,15 +81,15 @@ class MultiHeadAttention(nn.Module):
             .transpose(1, 2)
             for lin, x in zip(self.lins, (query, key, value))
         ]
-        # Compute attention
-        scores = torch.matmul(query, key.transpose(-2, -1)) / math.sqrt(self.head_size)
+        
         if mask is not None:
+            assert mask.dtype == torch.bool, "Use boolean masks (True=allow, False=block)."
             # mask shape: (batch_size, seq_len) -> (batch_size, 1, 1, seq_len)
             if mask.dim() == 2:
                 mask = mask.unsqueeze(1).unsqueeze(2)
             elif mask.dim() == 3:
                 mask = mask.unsqueeze(1)
-            scores = scores.masked_fill(mask == 0, float('-inf'))
+
         x, self.attn = self.attention(query, key, value, mask=mask, dropout=self.dropout)
         # Concatenate heads and project
         x = (
