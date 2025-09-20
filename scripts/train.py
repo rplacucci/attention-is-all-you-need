@@ -217,8 +217,8 @@ if master_process:
     print(f"Loaded {scheduler.__class__.__name__} learning rate scheduler")
 
 # Setup tensorboard and directories for logging/saving
-out_dir = f"./models/{args.model_config}-{lang_pair}-grad_accum_steps-{grad_accum_steps}"
-log_dir = f"./logs/{args.model_config}-{lang_pair}-grad_accum_steps-{grad_accum_steps}"
+out_dir = f"./models/{args.model_config}-{lang_pair}"
+log_dir = f"./logs/{args.model_config}-{lang_pair}"
 
 if master_process:
     writer = SummaryWriter(log_dir)
