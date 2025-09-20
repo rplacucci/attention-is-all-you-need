@@ -15,22 +15,15 @@ def thousands(x, pos):
 lang_a = args.lang
 lang_b = "en"
 lang_pair = f"{lang_a}-{lang_b}"
+input_path = f"./outputs/base-{lang_pair}-valid.csv"
 out_path = f"./outputs/loss_{lang_pair}.png"
 
-files = {
-    'train': f"./outputs/base-{lang_pair}-train.csv",
-    'valid': f"./outputs/base-{lang_pair}-valid.csv"
-}
-
-for k, v in files.items():
-    df = pd.read_csv(v)
-    plt.plot(df['Step'], df['Value'], label=k)
-
+df = pd.read_csv(input_path)
+plt.plot(df['Step'], df['Value'])
 plt.gca().xaxis.set_major_formatter(FuncFormatter(thousands))
 plt.xlabel("Step")
 plt.ylabel("Loss")
 plt.grid(True)
-plt.legend()
 plt.savefig(out_path, dpi=300)
 
 print(f"Saved plot to {out_path}")
