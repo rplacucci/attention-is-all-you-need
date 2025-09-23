@@ -281,7 +281,7 @@ if distributed:
 
 # Begin training loop
 ckpt_steps = 100
-save_steps = 10000
+save_steps = 10000 if args.model_config == 'base' else 100000
 valid_steps = 200
 step = start_step
 
