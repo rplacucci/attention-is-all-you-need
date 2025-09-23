@@ -28,7 +28,11 @@ class Attention(nn.Module):
         attn = F.softmax(scores, dim=-1)
         if dropout is not None:
             attn = dropout(attn)
+        self.attn = attn  # Store attention weights
         return torch.matmul(attn, value), attn
+    
+    def get_attention_weights(self):
+        return self.attn
     
 class MultiHeadAttention(nn.Module):
     """

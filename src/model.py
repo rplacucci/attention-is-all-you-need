@@ -82,6 +82,8 @@ class EncoderLayer(nn.Module):
             Tensor: Output tensor.
         """
         x = self.sublayers[0](x, lambda x: self.attention(x, x, x, mask))
+        # Store attention weights
+        self.attention.attn = self.attention.attention.get_attention_weights()
         x = self.sublayers[1](x, self.feed_forward)
         return x
     
@@ -107,9 +109,10 @@ class DecoderLayer(nn.Module):
         self.sublayers = nn.ModuleList([SublayerConnection(embed_size, dropout) for _ in range(3)])
 
     def forward(self, x, memory, src_mask, tgt_mask):
-        m = memory
         x = self.sublayers[0](x, lambda x: self.s_attention(x, x, x, tgt_mask))   # self-attn
-        x = self.sublayers[1](x, lambda x: self.x_attention(x, m, m, src_mask))   # cross-attn
+        self.s_attention.attn = self.s_attention.attention.get_attention_weights()
+        x = self.sublayers[1](x, lambda x: self.x_attention(x, memory, memory, src_mask))   # cross-attn
+        self.x_attention.attn = self.x_attention.attention.get_attention_weights()
         x = self.sublayers[2](x, self.feed_forward)  # FFN
         return x
     
