@@ -40,8 +40,8 @@ torch.cuda.manual_seed(seed)
 torch.set_float32_matmul_precision("high")
 
 # Setup tokenizer
-src_lang = args.lang
-tgt_lang = "en"
+src_lang = args.src_lang
+tgt_lang = args.tgt_lang
 lang_pair = f"{src_lang}-{tgt_lang}"
 
 path_vocab = f"./vocab/wmt14_{lang_pair}/bpe_{lang_pair}.json"
@@ -125,6 +125,8 @@ refs = []
 model.eval()
 with torch.no_grad():
     for idx, batch in enumerate(tqdm(loader, total=len(loader), desc="Generating predictions")):
+        if idx == 3:
+            break
         for k, v in batch.items():
             if isinstance(v, torch.Tensor):
                 batch[k] = v.to(device)
