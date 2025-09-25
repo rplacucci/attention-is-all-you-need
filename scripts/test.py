@@ -110,7 +110,7 @@ refs = []
 
 model.eval()
 with torch.no_grad():
-    for batch in tqdm(loader, total=len(loader), desc="Generating predictions"):
+    for idx, batch in enumerate(tqdm(loader, total=len(loader), desc="Generating predictions")):
         for k, v in batch.items():
             if isinstance(v, torch.Tensor):
                 batch[k] = v.to(device)
@@ -141,9 +141,18 @@ with torch.no_grad():
 
 # Setup scoring metric
 bleu = evaluate.load('bleu')
+sacre = evaluate.load('sacrebleu')
 
-# Evauate and save
-results = bleu.compute(predictions=preds, references=refs)
-print(results)
+# Evaluate and print
+bleu_score = bleu.compute(predictions=preds, references=refs)
+print(bleu_score)
+sacrebleu_score = sacre.compute(predictions=preds, references=[r[0] for r in refs])
+print(sacrebleu_score)
+
+# Package and save
+results = {
+    'bleu': bleu_score,
+    'sacrebleu': sacrebleu_score
+}
 with open(os.path.join(out_dir, f"{args.model_config}-{lang_pair}.json"), "w") as f:
     json.dump(results, f, indent=4)
