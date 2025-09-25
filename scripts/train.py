@@ -31,9 +31,10 @@ from src.collate import pad_collate
 # Config argparser
 parser = argparse.ArgumentParser(description="Train the original Transformer for language translation")
 parser.add_argument("--model_config", type=str, default="base", help="Size of model from configs.yaml ('base' or 'big')")
-parser.add_argument("--lang", type=str, default="de", help="Langauge to translate to/from English ('cs', 'de', 'fr', 'hi', 'ru)")
+parser.add_argument("--src_lang", type=str, default="de", help="Source language ('cs', 'de', 'fr', 'hi', 'ru)")
+parser.add_argument("--tgt_lang", type=str, default="en", help="Target language ('cs', 'de', 'fr', 'hi', 'ru)")
 parser.add_argument("--batch_size", type=int, default=32, help="Number of samples per training step (16, 32, 64, etc.)")
-parser.add_argument("--grad_accum_steps", type=int, default=1, help="Number of gradient accumulation steps to hit ~25K non-pad tokens per iteration")
+parser.add_argument("--grad_accum_steps", type=int, default=1, help="Number of gradient accumulation steps to use a certain number of non-pad tokens per iteration")
 args = parser.parse_args()
 
 # Initialize distributed processing
@@ -68,9 +69,9 @@ torch.cuda.manual_seed(seed)
 torch.set_float32_matmul_precision("high")
 
 # Setup tokenizer
-lang_a = args.lang
-lang_b = "en"
-lang_pair = f"{lang_a}-{lang_b}"
+src_lang = args.src_lang
+tgt_lang = args.tgt_lang
+lang_pair = f"{src_lang}-{tgt_lang}"
 
 path_vocab = f"./vocab/wmt14_{lang_pair}/bpe_{lang_pair}.json"
 if not os.path.exists(path_vocab) and master_process:
@@ -102,7 +103,24 @@ batch_size = args.batch_size
 max_len = config['max_len']
 
 # Load dev dataset
-wmt14 = load_dataset("wmt/wmt14", lang_pair)
+try:
+    wmt14 = load_dataset("wmt/wmt14", lang_pair)
+    dataset_lang_pair = lang_pair
+except:
+    # If the pair doesn't exist, try reversing it (e.g., "en-de" -> "de-en")
+    reversed_pair = f"{tgt_lang}-{src_lang}"
+    try:
+        wmt14 = load_dataset("wmt/wmt14", reversed_pair)
+        dataset_lang_pair = reversed_pair
+        if master_process:
+            print(f"Language pair {lang_pair} not found, using {reversed_pair} instead")
+    except:
+        if master_process:
+            print(f"Neither {lang_pair} nor {reversed_pair} found in WMT14 dataset")
+        if distributed:
+            destroy_process_group()
+        sys.exit(1)
+
 splits = ['train', 'validation']
 time.sleep(5)
 
@@ -118,8 +136,8 @@ train_dataset = WMT14Dataset(
     dataset=wmt14['train'],
     tokenizer=tokenizer,
     max_len=max_len,
-    src_lang=lang_a,
-    tgt_lang=lang_b
+    src_lang=src_lang,
+    tgt_lang=tgt_lang
 )
 
 train_sampler = StatefulDistributedSampler(
@@ -170,8 +188,8 @@ valid_dataset = WMT14Dataset(
     dataset=wmt14['validation'],
     tokenizer=tokenizer,
     max_len=max_len,
-    src_lang=lang_a,
-    tgt_lang=lang_b
+    src_lang=src_lang,
+    tgt_lang=tgt_lang
 )
 
 valid_sampler = StatefulDistributedSampler(
@@ -280,6 +298,7 @@ if distributed:
     dist.barrier()
 
 # Begin training loop
+log_steps = 10
 ckpt_steps = 100
 save_steps = 10000 if args.model_config == 'base' else 100000
 valid_steps = 200
@@ -379,8 +398,9 @@ while step < total_steps:
 
     if master_process:
         print(f"(train) step: {step:6d}/{total_steps} | loss: {loss:.4f} | lr: {lr:.4e} | norm: {norm:.4f} | tok: {non_pad_tokens:,} | tok/sec: {tokens_per_sec:07,d}")
-        writer.add_scalar("loss/train", loss, step)
-        writer.add_scalar("lr", lr, step)
+        if step % log_steps == 0:
+            writer.add_scalar("loss/train", loss, step)
+            writer.add_scalar("lr", lr, step)
 
     if distributed:
         dist.barrier()

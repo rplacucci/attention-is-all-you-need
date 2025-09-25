@@ -24,7 +24,8 @@ from src.decode import beam_search_decode
 # Config argparser
 parser = argparse.ArgumentParser(description="Test the original Transformer for language translation")
 parser.add_argument("--model_config", type=str, default="base", help="Size of model from configs.yaml ('base' or 'big')")
-parser.add_argument("--lang", type=str, default="de", help="Langauge to translate to/from English ('cs', 'de', 'fr', 'hi', 'ru)")
+parser.add_argument("--src_lang", type=str, default="de", help="Source language ('cs', 'de', 'fr', 'hi', 'ru)")
+parser.add_argument("--tgt_lang", type=str, default="en", help="Target language ('cs', 'de', 'fr', 'hi', 'ru)")
 parser.add_argument("--batch_size", type=int, default=128, help="Number of samples per testing step (16, 32, 64, etc.)")
 parser.add_argument("--max_len", type=int, default=128, help="Maximum number of tokens to decode (default: 100, as in Vaswani et al.)")
 args = parser.parse_args()
@@ -39,9 +40,9 @@ torch.cuda.manual_seed(seed)
 torch.set_float32_matmul_precision("high")
 
 # Setup tokenizer
-lang_a = args.lang
-lang_b = "en"
-lang_pair = f"{lang_a}-{lang_b}"
+src_lang = args.lang
+tgt_lang = "en"
+lang_pair = f"{src_lang}-{tgt_lang}"
 
 path_vocab = f"./vocab/wmt14_{lang_pair}/bpe_{lang_pair}.json"
 if not os.path.exists(path_vocab):
@@ -78,15 +79,28 @@ max_len = args.max_len
 collate_fn = lambda batch: pad_collate(batch, pad_id=pad_token_id)
 
 # Load test dataset
-wmt14 = load_dataset("wmt/wmt14", lang_pair, split='test')
-print(f"Loaded WMT14[{lang_pair}] dataset with {len(wmt14):,} test sequence pairs")
+try:
+    wmt14 = load_dataset("wmt/wmt14", lang_pair, split='test')
+    dataset_lang_pair = lang_pair
+except:
+    # If the pair doesn't exist, try reversing it (e.g., "en-de" -> "de-en")
+    reversed_pair = f"{tgt_lang}-{src_lang}"
+    try:
+        wmt14 = load_dataset("wmt/wmt14", reversed_pair, split='test')
+        dataset_lang_pair = reversed_pair
+        print(f"Language pair {lang_pair} not found, using {reversed_pair} instead")
+    except:
+        print(f"Neither {lang_pair} nor {reversed_pair} found in WMT14 dataset")
+        sys.exit(1)
+
+print(f"Loaded WMT14[{dataset_lang_pair}] dataset with {len(wmt14):,} test sequence pairs")
 
 dataset = WMT14Dataset(
     dataset=wmt14,
     tokenizer=tokenizer,
     max_len=max_len,
-    src_lang=lang_a,
-    tgt_lang=lang_b
+    src_lang=src_lang,
+    tgt_lang=tgt_lang
 )
 
 loader = DataLoader(
