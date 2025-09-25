@@ -5,13 +5,14 @@ import torch
 import argparse
 import matplotlib.pyplot as plt
 from mpl_toolkits.axes_grid1 import make_axes_locatable
+from tqdm import tqdm
 
 from tokenizers import Tokenizer
 
 from src.model import Transformer
 from src.utils import make_src_allow_mask, make_tgt_allow_mask
 
-def plot_attention_heads(attn_maps, title, filename, src_tokens=None, tgt_tokens=None):
+def plot_attention_heads(attn_maps, title, filename, src_tokens=None, tgt_tokens=None, output_dir="./outputs/attn_maps"):
     num_heads = attn_maps.shape[0]
     cols = 4
     rows = (num_heads + cols - 1) // cols
@@ -40,10 +41,10 @@ def plot_attention_heads(attn_maps, title, filename, src_tokens=None, tgt_tokens
             ax.axis("off")
 
     plt.tight_layout()
-    plt.savefig(os.path.join("./outputs/attn_maps/per_layer", filename), dpi=300)
+    plt.savefig(os.path.join(output_dir, "per_layer", filename), dpi=300)
     plt.close()
 
-def plot_single_attention(attn_map, title, filename, src_tokens=None, tgt_tokens=None):
+def plot_single_attention(attn_map, title, filename, src_tokens=None, tgt_tokens=None, output_dir="./outputs/attn_maps"):
     fig, ax = plt.subplots(figsize=(8, 8))
     im = ax.imshow(attn_map, cmap='inferno', vmin=0.0, vmax=1.0)
     ax.set_title(title, fontsize=12)
@@ -62,16 +63,16 @@ def plot_single_attention(attn_map, title, filename, src_tokens=None, tgt_tokens
     plt.colorbar(im, cax=cax)
 
     plt.tight_layout()
-    plt.savefig(os.path.join("./outputs/attn_maps/individual", filename), dpi=300)
+    plt.savefig(os.path.join(output_dir, "individual", filename), dpi=300)
     plt.close()
 
-def visualize_attention(model, src, tgt, src_mask, tgt_mask, tokenizer):
+def visualize_attention(model, src, tgt, src_mask, tgt_mask, tokenizer, output_dir="./outputs/attn_maps"):
     model.eval()
     
     # Setup directory
-    os.makedirs("./outputs/attn_maps", exist_ok=True)
-    os.makedirs("./outputs/attn_maps/individual", exist_ok=True)
-    os.makedirs("./outputs/attn_maps/per_layer", exist_ok=True)
+    os.makedirs(output_dir, exist_ok=True)
+    os.makedirs(os.path.join(output_dir, "individual"), exist_ok=True)
+    os.makedirs(os.path.join(output_dir, "per_layer"), exist_ok=True)
     
     with torch.no_grad():
         # Encode and decode to capture attention maps
@@ -83,60 +84,64 @@ def visualize_attention(model, src, tgt, src_mask, tgt_mask, tokenizer):
         tgt_tokens = [tokenizer.id_to_token(id) for id in tgt[0].tolist()]
 
         # Plot encoder self-attention
-        for i, layer in enumerate(model.encoder.layers):
+        for i, layer in enumerate(tqdm(model.encoder.layers, desc="Encoder Layers")):
             attn_maps = layer.attention.attn[0].cpu().numpy()  # All heads
-            plot_attention_heads(attn_maps, f"Encoder Layer {i+1} Self-Attention", f"s-attn_encoder_layer-{i+1:01d}.png", src_tokens, src_tokens)
+            plot_attention_heads(attn_maps, f"Encoder Layer {i+1} Self-Attention", f"s-attn_encoder_layer-{i+1:01d}.png", src_tokens, src_tokens, output_dir)
             
             # Plot individual attention maps for each head
-            for head in range(attn_maps.shape[0]):
+            for head in tqdm(range(attn_maps.shape[0]), desc=f"Encoder Layer {i+1} Heads", leave=False):
                 plot_single_attention(
                     attn_maps[head], 
                     f"Encoder L{i+1} H{head+1} Self-Attention", 
                     f"encoder_l{i+1:01d}_h{head+1:01d}_self.png", 
-                    src_tokens, src_tokens
+                    src_tokens, src_tokens, 
+                    output_dir
                 )
 
         # Plot decoder self-attention
-        for i, layer in enumerate(model.decoder.layers):
+        for i, layer in enumerate(tqdm(model.decoder.layers, desc="Decoder Self-Attention Layers")):
             attn_maps = layer.s_attention.attn[0].cpu().numpy()  # All heads
-            plot_attention_heads(attn_maps, f"Decoder Layer {i+1} Self-Attention", f"s-attn_decoder_layer-{i+1:01d}.png", tgt_tokens, tgt_tokens)
+            plot_attention_heads(attn_maps, f"Decoder Layer {i+1} Self-Attention", f"s-attn_decoder_layer-{i+1:01d}.png", tgt_tokens, tgt_tokens, output_dir)
             
             # Plot individual attention maps for each head
-            for head in range(attn_maps.shape[0]):
+            for head in tqdm(range(attn_maps.shape[0]), desc=f"Decoder Layer {i+1} Heads", leave=False):
                 plot_single_attention(
                     attn_maps[head], 
                     f"Decoder L{i+1} H{head+1} Self-Attention", 
                     f"decoder_l{i+1:01d}_h{head+1:01d}_self.png", 
-                    tgt_tokens, tgt_tokens
+                    tgt_tokens, tgt_tokens, 
+                    output_dir
                 )
 
         # Plot decoder cross-attention
-        for i, layer in enumerate(model.decoder.layers):
+        for i, layer in enumerate(tqdm(model.decoder.layers, desc="Decoder Cross-Attention Layers")):
             attn_maps = layer.x_attention.attn[0].cpu().numpy()  # All heads
-            plot_attention_heads(attn_maps, f"Decoder Layer {i+1} Cross-Attention", f"x-attn_decoder_layer-{i+1:01d}.png", src_tokens, tgt_tokens)
+            plot_attention_heads(attn_maps, f"Decoder Layer {i+1} Cross-Attention", f"x-attn_decoder_layer-{i+1:01d}.png", src_tokens, tgt_tokens, output_dir)
             
             # Plot individual attention maps for each head
-            for head in range(attn_maps.shape[0]):
+            for head in tqdm(range(attn_maps.shape[0]), desc=f"Decoder Layer {i+1} Heads", leave=False):
                 plot_single_attention(
                     attn_maps[head], 
                     f"Decoder L{i+1} H{head+1} Cross-Attention", 
                     f"decoder_l{i+1:01d}_h{head+1:01d}_cross.png", 
-                    src_tokens, tgt_tokens
+                    src_tokens, tgt_tokens, 
+                    output_dir
                 )
 
 # Config argparser
 parser = argparse.ArgumentParser(description="Train the original Transformer for language translation")
 parser.add_argument("--model_config", type=str, default="base", help="Size of model from configs.yaml ('base' or 'big')")
-parser.add_argument("--lang", type=str, default="de", help="Langauge to translate to/from English ('cs', 'de', 'fr', 'hi', 'ru)")
+parser.add_argument("--src_lang", type=str, default="de", help="Source language ('cs', 'de', 'fr', 'hi', 'ru)")
+parser.add_argument("--tgt_lang", type=str, default="en", help="Target language ('cs', 'de', 'fr', 'hi', 'ru)")
 args = parser.parse_args()
 
 # Setup device
 device = "cuda" if torch.cuda.is_available() else "cpu"
 
 # Setup tokenizer
-lang_a = args.lang
-lang_b = "en"
-lang_pair = f"{lang_a}-{lang_b}"
+src_lang = args.src_lang
+tgt_lang = args.tgt_lang
+lang_pair = f"{src_lang}-{tgt_lang}"
 
 path_vocab = f"./vocab/wmt14_{lang_pair}/bpe_{lang_pair}.json"
 if not os.path.exists(path_vocab):
@@ -165,12 +170,16 @@ max_len = 16
 pad_token_id = tokenizer.token_to_id("<pad>")
 
 example = {
+    "cs": "Rychlá hnědá liška přeskočí líného psa",
     "de": "Der schnelle braune Fuchs springt über den faulen Hund",
+    "fr": "Le rapide renard brun saute par-dessus le chien paresseux",
+    "hi": "तेज भूरी लोमड़ी सुस्त कुत्ते के ऊपर कूदती है",
+    "ru": "Быстрая коричневая лиса перепрыгивает через ленивую собаку",
     "en": "The quick brown fox jumps over the lazy dog"
 }
 
-src_text = example["de"]
-tgt_text = example["en"]
+src_text = example[src_lang]
+tgt_text = example[tgt_lang]
 
 src_enc = tokenizer.encode(src_text.lower(), add_special_tokens=False)
 tgt_enc = tokenizer.encode(tgt_text.lower(), add_special_tokens=False)
@@ -181,6 +190,8 @@ tgt_ids = torch.tensor(tgt_enc.ids, dtype=torch.long, device=device).unsqueeze(0
 src_mask = make_src_allow_mask(src_ids, pad_token_id)
 tgt_mask = make_tgt_allow_mask(tgt_ids, pad_token_id)
 
+output_dir = f"./outputs/attn_maps/{lang_pair}"
+
 print("Plotting attention maps...")
-visualize_attention(model, src_ids, tgt_ids, src_mask, tgt_mask, tokenizer)
+visualize_attention(model, src_ids, tgt_ids, src_mask, tgt_mask, tokenizer, output_dir)
 print("Done")
