@@ -12,6 +12,7 @@ from torch.utils.data import DataLoader
 from tqdm import tqdm
 from datasets import load_dataset
 from tokenizers import Tokenizer
+from sacremoses import MosesDetokenizer
 
 from src.model import Transformer
 from src.collate import pad_collate
@@ -114,6 +115,9 @@ loader = DataLoader(
     shuffle=False
 )
 
+# Setup detokenizer
+detokenizer = MosesDetokenizer(lang=tgt_lang)
+
 # Setup directories for saving
 out_dir = f"./results"
 os.makedirs(out_dir, exist_ok=True)
@@ -125,8 +129,6 @@ refs = []
 model.eval()
 with torch.no_grad():
     for idx, batch in enumerate(tqdm(loader, total=len(loader), desc="Generating predictions")):
-        if idx == 3:
-            break
         for k, v in batch.items():
             if isinstance(v, torch.Tensor):
                 batch[k] = v.to(device)
@@ -155,20 +157,17 @@ with torch.no_grad():
         decoded_text = tokenizer.decode_batch(tgt_ids.tolist())
         refs.extend([[ref] for ref in decoded_text])
 
+# Detokenize predictions and references for sacreBLEU
+detokenized_preds = [detokenizer.detokenize(pred.split()) for pred in preds]
+detokenized_refs = [detokenizer.detokenize(ref[0].split()) for ref in refs]
+
 # Setup scoring metric
-bleu = evaluate.load('bleu')
-sacre = evaluate.load('sacrebleu')
+bleu = evaluate.load('sacrebleu')
 
 # Evaluate and print
-bleu_score = bleu.compute(predictions=preds, references=refs)
-print(bleu_score)
-sacrebleu_score = sacre.compute(predictions=preds, references=[r[0] for r in refs])
-print(sacrebleu_score)
+score = bleu.compute(predictions=detokenized_preds, references=detokenized_refs)
+print(score)
 
-# Package and save
-results = {
-    'bleu': bleu_score,
-    'sacrebleu': sacrebleu_score
-}
+# Save
 with open(os.path.join(out_dir, f"{args.model_config}-{lang_pair}.json"), "w") as f:
-    json.dump(results, f, indent=4)
+    json.dump(score, f, indent=4)
