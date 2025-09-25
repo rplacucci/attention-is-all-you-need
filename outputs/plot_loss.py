@@ -14,15 +14,18 @@ def thousands(x, pos):
 
 lang_a = args.lang
 lang_b = "en"
-lang_pair = f"{lang_a}-{lang_b}"
-input_path = f"./outputs/base-{lang_pair}-valid.csv"
-out_path = f"./outputs/loss_{lang_pair}.png"
+lang_pairs = [f"{lang_a}-{lang_b}", f"{lang_b}-{lang_a}"]
+out_path = f"./outputs/loss_{lang_a}.png"
 
-df = pd.read_csv(input_path)
-plt.plot(df['Step'], df['Value'])
+for lang_pair in lang_pairs:
+    input_path = f"./outputs/base-{lang_pair}-valid.csv"
+    df = pd.read_csv(input_path)
+    plt.plot(df['Step'], df['Value'], label=lang_pair)
 plt.gca().xaxis.set_major_formatter(FuncFormatter(thousands))
 plt.xlabel("Step")
 plt.ylabel("Loss")
+plt.ylim([2.5, 4.5])
+plt.legend()
 plt.grid(True)
 plt.savefig(out_path, dpi=300)
 
