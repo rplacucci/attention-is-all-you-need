@@ -1,10 +1,68 @@
 # Attention Is All You Need
 
-This repository contains my personal implementation of **Attention Is All You Need** in PyTorch. The project covers training on the **WMT 2014 English-to-German** translation benchmark with evaluation using the **BLEU** score against the [official Transformer implementation](https://github.com/tensorflow/tensor2tensor).
+This repository contains my personal implementation of **Attention Is All You Need** in PyTorch. The project covers training on the **WMT 2014 English→German** translation benchmark with evaluation using the **BLEU** score against the [official Transformer implementation](https://github.com/tensorflow/tensor2tensor).
 ## 🌟 Introduction
 
+This project is a **ground-up Pytorch implementation**, aiming to:
+- Describe the Transformer architecture
+- Reimplement the original Transformer from scratch
+- Train the model on the WMT14 English→German dataset
+- Compare the performance with the official Transformer implementation
 ## 🏗️ Model Overview
 
+### Tokenization
+
+Raw text is tokenized using **Byte Pair Encoding (BPE)** with a shared vocabulary of $V$ tokens. Without any loss of generality, the tokenization step can be described as an operation that maps a sequence of characters $\mathbf{w}$ into a sequence of integers $\mathbf{x}$:
+$$
+\mathrm{Tokenizer}: \mathbf{w}=[w_1,\ldots,w_N] \to \mathbf{x}=[x_1,\ldots,x_T]
+$$
+where $x_t\in\{0,\ldots,V-1\}$ and $N\geq T$. 
+### Token embedding
+
+A **learned embedding** $\mathbf{E} \in \mathbb{R}^{V \times d_\mathrm{model}}$ projects discrete token IDs into a continuous vector space of fixed dimensionality $d_\mathrm{model}$
+### Positional encoding
+
+Sinusoidal **positional encodings** $\mathbf{R} \in \mathbb{R}^{T \times d_\mathrm{model}}$ are added to the input embeddings to inject information about the absolute and relative positions of the tokens in the sequence. Formally:
+$$
+r_{ti} =
+\begin{cases}
+\sin{\left(\frac{t}{L^{2i/d_\mathrm{model}}}\right)} & \text{if } i \text{ is even} \\
+\cos{\left(\frac{t}{L^{2i/d_\mathrm{model}}}\right)} & \text{if } i \text{ is odd}
+\end{cases}
+$$
+where $t\in[0,T)$ is the token position, $i\in[0,\lfloor d_\mathrm{model}/2 \rfloor -1)$ refers to the embedding dimension, and $L$ is a hyperparameter that forces the wavelengths to exhibit a geometric progression from $2\pi$ to $2\pi L$.
+### Attention
+
+
+### Causal Masking
+
+**Causal masking** is applied to the self-attention layers of the decoder stack to prevent tokens from attend to tokens later in the sequence. This is achieved by setting to to zero all the attention coefficients that correspond to a token attending to any later token in the sequence. In practice, this is achieved by setting the pre-activations corresponding to illegal connections to $-\infty$. We let $\mathbf{M} \in \mathbb{R}^{T \times T}$ be a mask matrix with entries:
+$$
+M_{ij} = 
+\begin{cases}
+0 && \text{if } j \leq i \\
+-\infty && \text{if } j > i
+\end{cases}
+$$
+Then the masked attention head is defined as:
+$$
+\mathrm{MaskedAttention}(\mathbf{Q},\mathbf{K},\mathbf{V}) = \mathrm{softmax}\left( \frac{\mathbf{Q}\mathbf{K}^\mathrm{T}}{\sqrt{d_k}} + \mathbf{M}\right) \mathbf{V}
+$$
+Here, the mask $\mathbf{M}$ is added element-wise to the attention logits. The entries with $-\infty$ become zero after softmax since $\exp(-\infty)=0$, ensuring that token $i$ only attends to tokens $j\leq i$.
+### Feed-forward newtork
+
+Each layer in the encoder and decoder also contains a fully-connected feed-forward network whose aim is to map the information learned by the attention layers into a more nonlinear and expressive space. Given an input matrix $\mathbf{X}\in\mathbb{R}^{T\times d_\mathrm{model}}$ (from the attention sublayer), the feed-forward network is given by:
+$$
+\mathrm{FFN}(\mathbf{X}) = \mathrm{ReLU}(\mathbf{X}\mathbf{W}_1+\mathbf{b}_1)\mathbf{W}_2+\mathbf{b}_2
+$$
+where $\mathbf{W}$ and $\mathbf{b}$ denote the weights and biases of the linear layers, respectively, with an inner dimensionality of $d_\mathrm{ff}$.
+### Residual connections & layer normalization
+
+A *residual connection* followed by *layer normalization* is employed around the attention and feed-forward sublayers so that we can stack several encoder and decoder layers on top of each other while avoiding any pitfalls during training. Without any loss of generality, this can be expressed as:
+$$
+\mathbf{X}' = \mathrm{LayerNorm}(\mathbf{X}+\mathrm{Sublayer}(\mathbf{X}))
+$$
+where $\mathbf{X} \in \mathbb{R}^{T \times d_\mathrm{model}}$ denotes the input and $\mathrm{Sublayer}$ is given by either $\mathrm{MultiHead}$ or $\mathrm{FFN}$. Note that this operations retain the dimensionality of the inputs.
 ## ⚙️ Installation
 
 **1. Clone the repository**
@@ -84,7 +142,7 @@ The validation cross-entropy loss exhibits the typical learning behavior for a T
 
 ![validation loss curve](./outputs/loss_de.png)
 
-**Note:** Pre-training took ~9.5 hours on 4 NVIDIA A40 GPUs.
+**Note:** Each training run took ~9.5 hours on 4 NVIDIA A40 GPUs.
 ### BLEU evaluation
 
 The following table summarizes BLEU scores on the **WMT14 English→German** test set for several well-known sequence-to-sequence models, compared against this implementation:
@@ -106,7 +164,7 @@ Overall, this implementation achieves **31.2 sacreBLEU**, which is **3-4 BLEU hi
 - While this implementation used the same hyperparameters for preprocessing (e.g., subword tokenization marges) and decoding (e.g., beam size, length penalty, etc.), variations in the dataset could have yielded a gain of several BLEU points
 - Modern training infrastructure (using Pytorch v2.8 vs TensorFlow v1.2-1.4) also tends to stabilize optimization and improve results
 
-Overall, while absolute values differ due to these factors, the results agree with the trends reported in Vaswani et al.; moreover, the sacreBLEU score for **GermanEnglish** translation is higher at **33.9**, which is consistent with other implementations.
+Overall, while absolute values differ due to these factors, the results agree with the trends reported in Vaswani et al.; moreover, the sacreBLEU score for **German→English** translation is higher at **33.9**, which is consistent with other implementations.
 ## Attention Maps
 
 The correctness of this implementation can be further validated by inspecting the **attention maps** and confirming whether they qualitatively align with the findings reported by Vaswani et al. (2017) and the papers that followed. Below is a summary of the key results from this implementation, using the example sentence pair:
@@ -138,11 +196,15 @@ Cross-attention aligns target tokens with source tokens. Behavior closely mirror
 - Late layers: Stable, specialized heads → combine sharp lexical alignment with broad semantic context
 
 ![decoder cross-attention](./outputs/attn_maps/en-de/select/decoder_cross_attention_subplots.png)
+
+These visualizations confirm that the implementation faithfully reproduces the qualitative behaviors of the original Transformer
 ## 🔮 Future Work
 
 - Implement baseline based on 🤗 `transformers`
-- Extend to translation to other languages (e.g., French, Czech, etc.)
+- Train and evaluate other model configurations (e.g., with `model_config=big`)
+- Extend translation to other languages (e.g., French, Czech, etc.)
 ## 📚 References
 
 - Vaswani, A., et al. (2017). *Attention is All You Need*.
+- Rush, A. (2018). *The Annotated Transformer*. Retrieved from [https://nlp.seas.harvard.edu/2018/04/03/attention.html](https://nlp.seas.harvard.edu/2018/04/03/attention.html)
 - Papineni, K., Roukos, S., Ward, T., & Zhu, W. J. (2002). *BLEU: a Method for Automatic Evaluation of Machine Translation*.
