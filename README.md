@@ -3,11 +3,15 @@
 This repository contains my personal implementation of **Attention Is All You Need** in PyTorch. The project covers training on the **WMT 2014 English→German** translation benchmark with evaluation using the **BLEU** score against the [official Transformer implementation](https://github.com/tensorflow/tensor2tensor).
 ## 🌟 Introduction
 
+The **Transformer** architecture represents a pivotal shift in sequence modeling, replacing recurrent and convolutional mechanisms with a pure attention-based framework. Introduced by [Vaswani et al. (2017)](https://arxiv.org/abs/1706.03762), the core innovation lies in the **attention** mechanism, which enables each element in a sequence to directly attend to every other element, regardless of distance. This departure from recurrence allows for highly parallelizable training and significantly improved efficiency in capturing long-range dependencies.  
+
+The general-purpose nature of the Transformer, combined with its scalability, has enabled it to achieve **state-of-the-art performance** across a wide spectrum of tasks in **natural language processing**, vision, and beyond, establishing attention as the fundamental building block of modern deep learning systems.
+
 This project is a **ground-up Pytorch implementation**, aiming to:
 - Describe the Transformer architecture
 - Reimplement the original Transformer from scratch
 - Train the model on the WMT14 English→German dataset
-- Compare the performance with the official Transformer implementation
+- Compare performance with the official Transformer implementation
 ## 🏗️ Model Overview
 
 ### Tokenization
@@ -124,16 +128,20 @@ where $\epsilon=0.1$. This technique prevents overconfidence and improves genera
 **Dropout** with a rate of $P_\mathrm{drop}=0.1$ is applied to the output of each sublayer (before normalization) and to the sums of the embeddings and positional encodings in both the encoder and decoder stacks.
 ### Optimizer and learning rate
 
-The **Adam** optimizer with $\beta_1=0.9$, $\beta_2=0.98$, and $\epsilon=10^{-8}$ was used during training with a **learning rate** characterized by a **linear warmup** over $T_\mathrm{warmup}=4,000$ steps followed by an inverse square root decrease:
+The **Adam** optimizer with $\beta_1=0.9$, $\beta_2=0.98$, and $\epsilon=10^{-8}$ was used during training with a **learning rate** characterized by a **linear warmup** over $T_\mathrm{warmup}=4,000$ steps followed by an inverse square root decay:
 ```math
 \eta(t) = \frac{1}{\sqrt{d_\mathrm{model}}}\cdot\min\left(\frac{1}{\sqrt{t}},t\cdot T_\mathrm{warmup} \right)
 ```
 ### ⚡️ Inference
 
 **Beam search** with a beam size of $b=4$ and a length penalty of $\alpha=0.6$ was used to select the next-token ID from the predicted next-token probability. The chosen token ID is then **de-tokenized** using the inverse of the BPE algorithm to generate the output text. Generation proceeds **autoregressively** until either an end-of-sequence token `</s>` is produced or predefined maximum sequence length `max_len` is reached, at which point the decoding process terminates.
-
 ## 🔍 Implementation Details
 
+- The WMT14 dataset was downloaed using the 🤗 `datasets` library from https://huggingface.co/datasets/wmt/wmt14
+- Tokenization was handled via the 🤗 `tokenizers` library, using a `BPE` tokenizer with `Whitespace` pre-tokenization and the special tokens `["<s>", "<pad>", "</s>", "<unk>"]`
+- Batches were contructed dynamically to ensure the model sees ~20K non-padding tokens at each training step
+- Decoded ouputs were detokenized using `MosesDetokenizer` from the `sacremoses` library
+- BLEU scores where computed using the `sacrebleu` metric from the 🤗 `evaluate library`
 ## ⚙️ Installation
 
 **1. Clone the repository**
@@ -180,7 +188,7 @@ tensorboard --logdir=logs
 ```
 ### Evaluation
 
-Evaluate on the BLEU metric using 🤗 `evaluate`:
+Evaluate on the BLEU metric:
 ```bash
 torchrun --standalone --nproc-per-node=1 -m scripts.test --model_config=base --src_lang=en --tgt_lang=de
 ```
