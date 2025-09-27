@@ -13,9 +13,9 @@ This project is a **ground-up Pytorch implementation**, aiming to:
 ### Tokenization
 
 Raw text is tokenized using **Byte Pair Encoding (BPE)** with a shared vocabulary of $V$ tokens. Without any loss of generality, the tokenization step can be described as an operation that maps a sequence of characters $\mathbf{w}$ into a sequence of integers $\mathbf{x}$:
-$$
+```math
 \mathrm{Tokenizer}: \mathbf{w}=[w_1,\ldots,w_N] \to \mathbf{x}=[x_1,\ldots,x_T]
-$$
+```
 where $x_t\in\{0,\ldots,V-1\}$ and $N\geq T$. 
 ### Token embedding
 
@@ -23,46 +23,117 @@ A **learned embedding** $\mathbf{E} \in \mathbb{R}^{V \times d_\mathrm{model}}$ 
 ### Positional encoding
 
 Sinusoidal **positional encodings** $\mathbf{R} \in \mathbb{R}^{T \times d_\mathrm{model}}$ are added to the input embeddings to inject information about the absolute and relative positions of the tokens in the sequence. Formally:
-$$
+```math
 r_{ti} =
 \begin{cases}
 \sin{\left(\frac{t}{L^{2i/d_\mathrm{model}}}\right)} & \text{if } i \text{ is even} \\
 \cos{\left(\frac{t}{L^{2i/d_\mathrm{model}}}\right)} & \text{if } i \text{ is odd}
 \end{cases}
-$$
+```
 where $t\in[0,T)$ is the token position, $i\in[0,\lfloor d_\mathrm{model}/2 \rfloor -1)$ refers to the embedding dimension, and $L$ is a hyperparameter that forces the wavelengths to exhibit a geometric progression from $2\pi$ to $2\pi L$.
 ### Attention
 
+The encoder and decoder stacks rely on the mechanism of **attention**, which can be described as mapping a query and a set of key-value pairs to an output. The output is computed as a weighted sum of the values, where the weights assigned to each value is computed by a similarity function of the query and the corresponding key. 
 
+Given input embeddings $\mathbf{X}\in\mathbb{R}^{T\times d_\mathrm{model}}$, queries, keys, and values are obtained via learned projections:
+```math
+\mathbf{Q}=\mathbf{X}\mathbf{W}^{(q)},\quad 
+\mathbf{K}=\mathbf{X}\mathbf{W}^{(k)},\quad 
+\mathbf{V}=\mathbf{X}\mathbf{W}^{(v)}
+```
+with $\mathbf{Q},\mathbf{K}\in\mathbb{R}^{T\times d_k}$ and $\mathbf{V}\in\mathbb{R}^{T\times d_v}$. The factor $1/\sqrt{d_k}$ is included to stabilize gradients by normalizing dot product variance. The results is what we refer to **scaled dot-product attention**:
+```math
+\mathrm{Attention}(\mathbf{Q},\mathbf{K},\mathbf{V})
+= \mathrm{softmax}\!\left(\tfrac{\mathbf{Q}\mathbf{K}^\top}{\sqrt{d_k}}\right)\mathbf{V}
+```
+### Multi-head attention
+
+To capture multiple representation subspaces, queries, keys, and values are projected $H$ times:
+```math
+\mathbf{Q}_h=\mathbf{X}\mathbf{W}_h^{(q)},\quad 
+\mathbf{K}_h=\mathbf{X}\mathbf{W}_h^{(k)},\quad 
+\mathbf{V}_h=\mathbf{X}\mathbf{W}_h^{(v)},\quad h=1,\dots,H
+```
+Each head computes:
+```math
+\mathbf{H}_h=\mathrm{Attention}(\mathbf{Q}_h,\mathbf{K}_h,\mathbf{V}_h)
+```
+The outputs are concatenated and projected, yielding **multi-head attention**:
+```math
+\mathrm{MultiHead}(\mathbf{Q},\mathbf{K},\mathbf{V})
+=\mathrm{Concat}[\mathbf{H}_1,\ldots,\mathbf{H}_H]\mathbf{W}^{(o)}
+```
+with $\mathbf{W}^{(o)}\in\mathbb{R}^{(Hd_v)\times d_\mathrm{model}}$ and $d_k=d_v=d_\mathrm{model}/H$. 
 ### Causal Masking
 
 **Causal masking** is applied to the self-attention layers of the decoder stack to prevent tokens from attend to tokens later in the sequence. This is achieved by setting to to zero all the attention coefficients that correspond to a token attending to any later token in the sequence. In practice, this is achieved by setting the pre-activations corresponding to illegal connections to $-\infty$. We let $\mathbf{M} \in \mathbb{R}^{T \times T}$ be a mask matrix with entries:
-$$
+```math
 M_{ij} = 
 \begin{cases}
 0 && \text{if } j \leq i \\
 -\infty && \text{if } j > i
 \end{cases}
-$$
+```
 Then the masked attention head is defined as:
-$$
+```math
 \mathrm{MaskedAttention}(\mathbf{Q},\mathbf{K},\mathbf{V}) = \mathrm{softmax}\left( \frac{\mathbf{Q}\mathbf{K}^\mathrm{T}}{\sqrt{d_k}} + \mathbf{M}\right) \mathbf{V}
-$$
+```
 Here, the mask $\mathbf{M}$ is added element-wise to the attention logits. The entries with $-\infty$ become zero after softmax since $\exp(-\infty)=0$, ensuring that token $i$ only attends to tokens $j\leq i$.
 ### Feed-forward newtork
 
 Each layer in the encoder and decoder also contains a fully-connected feed-forward network whose aim is to map the information learned by the attention layers into a more nonlinear and expressive space. Given an input matrix $\mathbf{X}\in\mathbb{R}^{T\times d_\mathrm{model}}$ (from the attention sublayer), the feed-forward network is given by:
-$$
+```math
 \mathrm{FFN}(\mathbf{X}) = \mathrm{ReLU}(\mathbf{X}\mathbf{W}_1+\mathbf{b}_1)\mathbf{W}_2+\mathbf{b}_2
-$$
+```
 where $\mathbf{W}$ and $\mathbf{b}$ denote the weights and biases of the linear layers, respectively, with an inner dimensionality of $d_\mathrm{ff}$.
 ### Residual connections & layer normalization
 
-A *residual connection* followed by *layer normalization* is employed around the attention and feed-forward sublayers so that we can stack several encoder and decoder layers on top of each other while avoiding any pitfalls during training. Without any loss of generality, this can be expressed as:
-$$
+A **residual connection** followed by **layer normalization** is employed around the attention and feed-forward sublayers so that we can stack several encoder and decoder layers on top of each other while avoiding any pitfalls during training. Without any loss of generality, this can be expressed as:
+```math
 \mathbf{X}' = \mathrm{LayerNorm}(\mathbf{X}+\mathrm{Sublayer}(\mathbf{X}))
-$$
+```
 where $\mathbf{X} \in \mathbb{R}^{T \times d_\mathrm{model}}$ denotes the input and $\mathrm{Sublayer}$ is given by either $\mathrm{MultiHead}$ or $\mathrm{FFN}$. Note that this operations retain the dimensionality of the inputs.
+### Linear + softmax layer
+
+A learned **linear** transformation and a **softmax** function are used to convert the decoder output to predicted next-token probabilities. Given the output of the decoder stack $\mathbf{Z}\in\mathbb{R}^{T \times d_\mathrm{model}}$, the linear transformation yields the logits:
+```math
+\mathbf{Z}' = \mathbf{Z}\mathbf{W}^{(p)}+\mathbf{b}^{(p)}
+```
+where $\mathbf{W}^{(p)}\in\mathbb{R}^{d_\mathrm{model}\times V}$ is the learned projection mapping from model space to vocabulary space. Instead learning $\mathbf{W}^{(p)}$ separately, we apply **weight sharing** and reuse the transposed embedding matrix, reducing the total number of trainable parameters and promoting symmetry between the input and output representations.
+
+The softmax function is then applied row-wise over the vocabulary dimension to yield the predicted token probabilities over every position in the sequence:
+```math
+\mathbf{P} = \mathrm{softmax}(\mathbf{Z}') = \mathrm{softmax}\left(\mathbf{Z}\mathbf{W}^{(p)}+\mathbf{b}^{(p)}\right)
+```
+where both the logits $\mathbf{Z}'$ and the next-token probabilities $\mathbf{P}$ have dimensionality $T\times V$.
+## 🏋️‍♂️ Training
+
+### Loss function & label smoothing
+
+The **cross-entropy loss function** is used to compare the predicted probability distribution over the vocabulary at each position against the ground-truth token at that position. **Label smoothing** was applied so that most of the probability mass is assigned to the correct class but a small portion is distributed uniformly over all classes:
+```math
+\tilde{\mathbf{y}}_{t,i} = 
+\begin{cases}
+1-\epsilon+\frac{\epsilon}{V}, && \text{if } i=y_t \\
+\frac{\epsilon}{V}, && \text{otherwise}
+\end{cases}
+```
+where $\epsilon=0.1$. This technique prevents overconfidence and improves generalization.
+### Dropout
+
+**Dropout** with a rate of $P_\mathrm{drop}=0.1$ is applied to the output of each sublayer (before normalization) and to the sums of the embeddings and positional encodings in both the encoder and decoder stacks.
+### Optimizer and learning rate
+
+The **Adam** optimizer with $\beta_1=0.9$, $\beta_2=0.98$, and $\epsilon=10^{-8}$ was used during training with a **learning rate** characterized by a **linear warmup** over $T_\mathrm{warmup}=4,000$ steps followed by an inverse square root decrease:
+```math
+\eta(t) = \frac{1}{\sqrt{d_\mathrm{model}}}\cdot\min\left(\frac{1}{\sqrt{t}},t\cdot T_\mathrm{warmup} \right)
+```
+### ⚡️ Inference
+
+**Beam search** with a beam size of $b=4$ and a length penalty of $\alpha=0.6$ was used to select the next-token ID from the predicted next-token probability. The chosen token ID is then **de-tokenized** using the inverse of the BPE algorithm to generate the output text. Generation proceeds **autoregressively** until either an end-of-sequence token `</s>` is produced or predefined maximum sequence length `max_len` is reached, at which point the decoding process terminates.
+
+## 🔍 Implementation Details
+
 ## ⚙️ Installation
 
 **1. Clone the repository**
@@ -203,6 +274,7 @@ These visualizations confirm that the implementation faithfully reproduces the q
 - Implement baseline based on 🤗 `transformers`
 - Train and evaluate other model configurations (e.g., with `model_config=big`)
 - Extend translation to other languages (e.g., French, Czech, etc.)
+- Experiment with other decoding strategies
 ## 📚 References
 
 - Vaswani, A., et al. (2017). *Attention is All You Need*.
