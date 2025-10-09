@@ -234,8 +234,8 @@ The following table summarizes BLEU scores on the **WMT14 English→German** tes
 | MoE                        | 26.0     |
 | GMNT + RL Ensemble         | 26.3     |
 | ConvS2S Ensemble           | 26.4     |
-| Tranformer (base)          | 27.3     |
-| Transforer (big)           | 28.4     |
+| Transformer (base)         | 27.3     |
+| Transformer (big)          | 28.4     |
 | *My Transformer (base)*    | *31.2*   |
 
 Overall, this implementation achieves **31.2 sacreBLEU**, which is **3-4 BLEU higher** than the original Transformer-base and competitive with or surpassing the Transformer big baseline. This difference in performance can be explained by a number of reasons:
