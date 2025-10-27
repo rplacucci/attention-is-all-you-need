@@ -132,6 +132,7 @@ The **Adam** optimizer with $\beta_1=0.9$, $\beta_2=0.98$, and $\epsilon=10^{-8}
 ```math
 \eta(t) = \frac{1}{\sqrt{d_\mathrm{model}}}\cdot\min\left(\frac{1}{\sqrt{t}},t\cdot T_\mathrm{warmup} \right)
 ```
+
 ## ⚡️ Inference
 
 **Beam search** with a beam size of $b=4$ and a length penalty of $\alpha=0.6$ was used to select the next-token ID from the predicted next-token probability. The chosen token ID is then **de-tokenized** using the inverse of the BPE algorithm to generate the output text. Generation proceeds **autoregressively** until either an end-of-sequence token `</s>` is produced or predefined maximum sequence length `max_len` is reached, at which point the decoding process terminates.
